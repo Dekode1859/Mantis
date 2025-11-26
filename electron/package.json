@@ -1,0 +1,55 @@
+{
+  "name": "mantis-shell",
+  "version": "0.1.0",
+  "description": "Electron shell for the Mantis Price Tracker",
+  "main": "main.js",
+  "scripts": {
+    "start": "cross-env ELECTRON_START_URL=http://localhost:3000 electron .",
+    "dev": "electron .",
+    "build": "electron-builder",
+    "bundle-all": "powershell -ExecutionPolicy Bypass -File ../scripts/package-mantis.ps1"
+  },
+  "devDependencies": {
+    "cross-env": "^7.0.3",
+    "electron": "^32.2.0",
+    "electron-builder": "^24.13.3"
+  },
+  "dependencies": {},
+  "build": {
+    "appId": "com.mantis.price-tracker",
+    "productName": "Mantis Price Tracker",
+    "artifactName": "mantis.${ext}",
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "portable": {
+      "artifactName": "mantis.exe"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../backend/dist",
+        "to": "."
+      },
+      {
+        "from": "../mantis/out",
+        "to": "frontend"
+      }
+    ]
+  }
+}
+
