@@ -9,6 +9,14 @@ import { Navbar } from "@/components/navbar"
 import { Sidebar } from "@/components/sidebar"
 import { ProductCard } from "@/components/product-card"
 import { isElectron, resolveBackendBaseUrl } from "@/lib/backend"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 
 type StockStatus = "In Stock" | "Out of Stock" | "Unknown"
 type PriceTrend = "up" | "down" | "flat" | "neutral"
@@ -29,6 +37,15 @@ interface TrackedProduct {
   lowestCurrency?: string | null
   lowestTimestamp?: string | null
   isRefreshing?: boolean
+}
+
+type RenderedProduct = TrackedProduct & {
+  priceLabel: string
+  previousPriceLabel: string | null
+  differenceLabel: string | null
+  trend: PriceTrend
+  isLowest: boolean
+  lowestPriceLabel: string | null
 }
 
 interface ProductExtractionResponse {
@@ -79,6 +96,8 @@ export default function Home() {
   const [isLoadingKeyStatus, setIsLoadingKeyStatus] = useState(false)
   const [apiKeyInput, setApiKeyInput] = useState("")
   const [isSavingApiKey, setIsSavingApiKey] = useState(false)
+  const [deletingIds, setDeletingIds] = useState<Set<number>>(new Set())
+  const [pendingDelete, setPendingDelete] = useState<RenderedProduct | null>(null)
   const [activeTab, setActiveTab] = useState<ActiveTab>("tracker")
 
   const isElectronEnv = isElectron()
@@ -272,9 +291,9 @@ export default function Home() {
               lastChecked: new Date().toISOString(),
               previousPrice: null,
               previousCurrency: null,
-              lowestPrice: structured.price,
-              lowestCurrency: structured.currency,
-              lowestTimestamp: new Date().toISOString(),
+              lowestPrice: null,
+              lowestCurrency: null,
+              lowestTimestamp: null,
               isRefreshing: false,
             }
             setProducts((prev) => {
@@ -318,7 +337,52 @@ export default function Home() {
     [handleTrack, products],
   )
 
-  const renderedProducts = useMemo(() => {
+  const performDelete = useCallback(
+    async (product: RenderedProduct | null) => {
+      if (!apiBaseUrl || !product) {
+        return
+      }
+
+      setDeletingIds((prev) => {
+        const next = new Set(prev)
+        next.add(product.id)
+        return next
+      })
+      setErrorMessage(null)
+
+      try {
+        const response = await fetch(`${apiBaseUrl}/products/${product.id}`, {
+          method: "DELETE",
+        })
+        if (!response.ok) {
+          let detail = "Failed to delete product."
+          try {
+            const payload = (await response.json()) as { detail?: string }
+            if (payload.detail) {
+              detail = payload.detail
+            }
+          } catch {
+            // ignore JSON parse errors
+          }
+          throw new Error(detail)
+        }
+        setProducts((prev) => prev.filter((item) => item.id !== product.id))
+        setPendingDelete(null)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Failed to delete product."
+        setErrorMessage(message)
+      } finally {
+        setDeletingIds((prev) => {
+          const next = new Set(prev)
+          next.delete(product.id)
+          return next
+        })
+      }
+    },
+    [apiBaseUrl],
+  )
+
+  const renderedProducts = useMemo<RenderedProduct[]>(() => {
     const epsilon = 1e-9
     return products.map((product) => {
       const priceLabel = formatPrice(product.price, product.currency)
@@ -334,10 +398,14 @@ export default function Home() {
         diff == null || Math.abs(diff) < epsilon
           ? null
           : `${diff > 0 ? "+" : "-"}${formatPrice(Math.abs(diff), product.currency)}`
-      const isLowest =
-        product.lowestPrice != null &&
-        product.price <= product.lowestPrice + epsilon &&
-        product.previousPrice != null
+      let isLowest = false
+      if (product.previousPrice != null && product.lowestPrice != null && product.lowestTimestamp && product.lastChecked) {
+        const lowestTimestamp = Date.parse(product.lowestTimestamp)
+        const latestTimestamp = Date.parse(product.lastChecked)
+        if (!Number.isNaN(lowestTimestamp) && !Number.isNaN(latestTimestamp)) {
+          isLowest = Math.abs(latestTimestamp - lowestTimestamp) < 1000
+        }
+      }
       const lowestPriceLabel =
         product.lowestPrice != null
           ? formatPrice(product.lowestPrice, product.lowestCurrency ?? product.currency)
@@ -386,15 +454,16 @@ export default function Home() {
   )
 
   return (
-    <div className="flex flex-col min-h-screen bg-background">
+    <div className="flex h-full flex-col bg-background overflow-hidden">
       <Navbar
         onSettingsClick={() => setActiveTab("settings")}
         isSettingsActive={activeTab === "settings"}
       />
       <div className="flex flex-1 overflow-hidden">
         <Sidebar activeTab={activeTab} onTabChange={setActiveTab} />
-        <main className="flex-1 overflow-auto">
-          <div className="container mx-auto px-6 py-12 space-y-12">
+        <main className="min-h-0 flex-1 overflow-hidden">
+          <div className="h-full min-h-0 overflow-y-auto">
+            <div className="container mx-auto px-6 py-12 space-y-12">
             {activeTab === "tracker" && (
               <>
                 {baseUnavailable && (
@@ -497,6 +566,8 @@ export default function Home() {
                           lowestPriceLabel={product.lowestPriceLabel}
                           onRefresh={() => void handleRefresh(product.id)}
                           isRefreshing={product.isRefreshing ?? false}
+                          onDelete={() => setPendingDelete(product)}
+                          isDeleting={deletingIds.has(product.id)}
                         />
                       ))}
                     </div>
@@ -532,7 +603,15 @@ export default function Home() {
                     </div>
 
                     <p className="text-sm text-muted-foreground">
-                      Enter your Google API key. Saving will restart the backend so the new key takes effect.
+                      Enter your Google API key. Saving will restart the backend so the new key takes effect.{" "}
+                      <a
+                        href="https://aistudio.google.com/apikey"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-emerald-400 underline-offset-4 hover:underline"
+                      >
+                        Get an API key from Google AI Studio.
+                      </a>
                     </p>
 
                     <form className="space-y-3" onSubmit={handleSaveApiKey}>
@@ -587,9 +666,56 @@ export default function Home() {
                 </p>
               </section>
             )}
+            </div>
           </div>
         </main>
       </div>
+      <Dialog
+        open={Boolean(pendingDelete)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPendingDelete(null)
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Remove product from tracker?</DialogTitle>
+            <DialogDescription>
+              {pendingDelete
+                ? `Deleting "${pendingDelete.title}" erases its stored price history. This action cannot be undone.`
+                : "Deleting this product erases its stored price history. This action cannot be undone."}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              className="bg-emerald-600/90 text-white hover:bg-emerald-500"
+              onClick={() => setPendingDelete(null)}
+              disabled={pendingDelete ? deletingIds.has(pendingDelete.id) : false}
+            >
+              Keep Tracking
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              className="bg-red-600 hover:bg-red-700"
+              onClick={() => void performDelete(pendingDelete)}
+              disabled={pendingDelete ? deletingIds.has(pendingDelete.id) : false}
+            >
+              {pendingDelete && deletingIds.has(pendingDelete.id) ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Removing…
+                </>
+              ) : (
+                "Delete Product"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

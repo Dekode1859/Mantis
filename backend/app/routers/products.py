@@ -140,3 +140,17 @@ async def trigger_refresh_all_products() -> Response:
     asyncio.create_task(refresh_all_products())
     return Response(status_code=status.HTTP_202_ACCEPTED)
 
+
+@router.delete("/{product_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_product(product_id: int, db: Session = Depends(get_db)) -> Response:
+    """
+    Permanently delete a tracked product and its price history.
+    """
+    product = db.query(Product).filter(Product.id == product_id).first()
+    if product is None:
+        raise HTTPException(status_code=404, detail="Product not found.")
+
+    db.delete(product)
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+

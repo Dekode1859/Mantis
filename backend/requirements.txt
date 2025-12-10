@@ -11,3 +11,4 @@ alembic==1.13.3
 apscheduler==3.10.4
 aiofiles==23.2.1
 python-dotenv==1.0.1
+pyinstaller==6.17.0

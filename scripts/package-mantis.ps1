@@ -3,7 +3,8 @@
 
 param(
   [switch] $SkipBackend,
-  [switch] $SkipFrontend
+  [switch] $SkipFrontend,
+  [string] $Version
 )
 
 Set-StrictMode -Version Latest
@@ -59,12 +60,17 @@ Invoke-Step "Packaging Electron shell" {
     Write-Host "node_modules missing, running npm install …"
     npm install --include=dev
   }
-  npm run build
+  if ($Version) {
+    Write-Host "Using build version $Version for this artifact."
+    npm run build:msi -- --config.extraMetadata.version=$Version
+  } else {
+    npm run build:msi
+  }
   if ($LASTEXITCODE -ne 0) {
     throw "Electron build failed with exit code $LASTEXITCODE."
   }
   Pop-Location
 }
 
-Write-Host "All artifacts are ready. Look for mantis.exe under electron\\dist."
+Write-Host "All artifacts are ready. Look for the MSI installer under electron\\dist."
 
