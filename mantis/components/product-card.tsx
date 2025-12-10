@@ -1,6 +1,6 @@
 import type { ComponentType } from "react"
 import Link from "next/link"
-import { AlertCircle, Check, HelpCircle, Link2, Loader2, RefreshCcw } from "lucide-react"
+import { AlertCircle, Check, HelpCircle, Link2, Loader2, RefreshCcw, Trash2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -23,6 +23,8 @@ interface ProductCardProps {
   lowestPriceLabel?: string | null
   onRefresh?: () => void
   isRefreshing?: boolean
+  onDelete?: () => void
+  isDeleting?: boolean
 }
 
 const STATUS_STYLES: Record<StockStatus, { badge: string; icon: ComponentType<{ className?: string }> }> = {
@@ -59,6 +61,8 @@ export function ProductCard({
   lowestPriceLabel,
   onRefresh,
   isRefreshing = false,
+  onDelete,
+  isDeleting = false,
 }: ProductCardProps) {
   const status = STATUS_STYLES[stockStatus] ?? STATUS_STYLES.Unknown
   const StatusIcon = status.icon
@@ -111,6 +115,7 @@ export function ProductCard({
             >
               {priceLabel}
             </div>
+            <div className="flex items-center gap-2">
             <Button
               variant="outline"
               size="icon"
@@ -120,6 +125,16 @@ export function ProductCard({
             >
               {isRefreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
             </Button>
+              <Button
+                variant="destructive"
+                size="icon"
+                onClick={() => onDelete?.()}
+                disabled={isDeleting || !onDelete}
+                className="h-8 w-8"
+              >
+                {isDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+              </Button>
+            </div>
           </div>
         </div>
 

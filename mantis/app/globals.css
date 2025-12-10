@@ -115,11 +115,47 @@
   --color-sidebar-ring: var(--sidebar-ring);
 }
 
+html,
+body {
+  height: 100%;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
   body {
     @apply bg-background text-foreground;
+    overflow: hidden;
   }
 }
+
+#__next {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+@layer utilities {
+  .app-drag {
+    -webkit-app-region: drag;
+  }
+  .app-no-drag {
+    -webkit-app-region: no-drag;
+  }
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: color-mix(in oklab, var(--border) 60%, transparent 40%);
+  border-radius: 9999px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+

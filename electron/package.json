@@ -1,12 +1,14 @@
 {
   "name": "mantis-shell",
   "version": "0.1.0",
+  "author": "Dekode1859",
   "description": "Electron shell for the Mantis Price Tracker",
   "main": "main.js",
   "scripts": {
     "start": "cross-env ELECTRON_START_URL=http://localhost:3000 electron .",
     "dev": "electron .",
     "build": "electron-builder",
+    "build:msi": "electron-builder --win",
     "bundle-all": "powershell -ExecutionPolicy Bypass -File ../scripts/package-mantis.ps1"
   },
   "devDependencies": {
@@ -23,17 +25,19 @@
       "output": "dist"
     },
     "win": {
+      "icon": "../mantis/public/mantis-icon.png",
       "target": [
         {
-          "target": "portable",
+          "target": "msi",
           "arch": [
             "x64"
           ]
         }
       ]
     },
-    "portable": {
-      "artifactName": "mantis.exe"
+    "msi": {
+      "artifactName": "mantis-${version}.msi",
+      "perMachine": false
     },
     "files": [
       "main.js",

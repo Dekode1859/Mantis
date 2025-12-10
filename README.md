@@ -1,6 +1,6 @@
 # Mantis Price Tracker
 
-A local-first, AI-powered product tracker that scrapes e‑commerce pages, runs a LangChain agent over the DOM, and keeps price history — all wrapped in a portable Electron bundle. Built to show what production-ready AI automation looks like when you own the entire stack.
+A local-first, AI-powered product tracker that scrapes e‑commerce pages, runs a LangChain agent over the DOM, and keeps price history — all wrapped in an installable Electron bundle. Built to show what production-ready AI automation looks like when you own the entire stack.
 
 ![Mantis screenshot](mantis/public/mantis-app.png)
 
@@ -8,7 +8,7 @@ A local-first, AI-powered product tracker that scrapes e‑commerce pages, runs 
 
 - **Full-stack AI agenting** – Selenium renders any storefront, Gemini 2.5 Flash extracts structured product facts, FastAPI normalizes and persists them.
 - **Local-first privacy** – Everything runs on-device; SQLite sits in the Electron user-data directory, and the agent only calls your key.
-- **Production deployment** – PyInstaller ships the Python backend as `mantis-engine.exe`, Electron bundles the Next.js UI, and a PowerShell script stitches everything into a single `mantis.exe`.
+- **Production deployment** – PyInstaller ships the Python backend as `mantis-engine.exe`, Electron bundles the Next.js UI, and a PowerShell script stitches everything into a single MSI installer.
 - **Resilient automation** – Six-hour APScheduler refreshes, per-product manual refresh, lowest-price tracking, trend deltas, timezone-aware timestamps.
 - **Operator experience** – Tray icon controls, live backend port discovery, API key management with secure storage and hot reload.
 
@@ -28,7 +28,7 @@ A local-first, AI-powered product tracker that scrapes e‑commerce pages, runs 
 - **Frontend**: Next.js 14 App Router, Shadcn UI, Tailwind CSS, static-exported for desktop delivery.
 - **Backend**: FastAPI, SQLAlchemy, APScheduler, LangChain with Google Gemini (configurable to Ollama).
 - **Scraping**: Selenium + webdriver-manager (headless Chrome).
-- **Packaging**: PyInstaller for backend, electron-builder (portable target) for desktop bundle.
+- **Packaging**: PyInstaller for backend, electron-builder MSI installer for desktop bundle.
 
 ## Key Features
 
@@ -70,20 +70,25 @@ npm install
 cross-env ELECTRON_START_URL=http://localhost:3000 npm run start
 ```
 
-## Ship It (Single Executable)
+## Ship It (MSI Installer)
 
 ```powershell
 # From repository root on Windows
 .\scripts\package-mantis.ps1
+# or, if you need to stamp a specific version number into the MSI metadata:
+.\scripts\package-mantis.ps1 -Version 0.2.0
 
 # Output artifacts
-# - backend/dist/mantis-engine.exe  (standalone FastAPI agent)
-# - electron/dist/mantis.exe        (portable desktop app, bundles backend + frontend)
+# - backend/dist/mantis-engine.exe      (standalone FastAPI agent)
+# - electron/dist/mantis-<version>.msi  (Windows installer, bundles backend + frontend)
 ```
 
 - PyInstaller compiles the backend with bundled dependencies.
 - Next.js builds a static export on demand (Electron auto-builds if missing).
-- electron-builder packages everything as a `portable` target — no installer loop, no symlink woes.
+- electron-builder packages everything as a guided MSI installer so Windows can manage shortcuts and installation paths.
+- Need to build manually? From `electron/`, run `npm run build:msi` (WiX Toolset required).
+- Building the MSI requires the [WiX Toolset](https://wixtoolset.org/) to be installed on your Windows build machine.
+- Update `mantis/public/mantis-icon.png` (and optionally `favicon.ico`) for new branding—electron-builder converts the PNG to ICO automatically so the window, tray, and shortcuts share the same artwork.
 
 ## Agent Flow
 
@@ -106,6 +111,11 @@ cross-env ELECTRON_START_URL=http://localhost:3000 npm run start
 - Ollama + local LLM fallback (Gemini optional).
 - Historical charts and export under the “History” tab.
 - Watchlists, alert thresholds, and multi-user profile settings.
+- CI/CD: GitHub Actions pipeline that validates PRs, builds backend/frontend/electron artifacts on Windows runners, and publishes MSI releases from tagged merges.
+
+## Changelog
+
+See [CHANGELOG.md](./CHANGELOG.md) for a versioned history of notable updates.
 
 ---
 
