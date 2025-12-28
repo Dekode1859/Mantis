@@ -1,0 +1,85 @@
+version: '3.8'
+
+services:
+  # 1. Database Service (PostgreSQL 15)
+  db:
+    image: postgres:15-alpine
+    container_name: mantis-db
+    restart: always
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: mantis_production
+    volumes:
+      - ./postgres_data:/var/lib/postgresql/data
+    networks:
+      - mantis-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d mantis_production"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 2. Backend Service (FastAPI)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: mantis-backend
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # Internal Docker DNS allows "db" hostname
+      DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@db:5432/mantis_production
+      # Google API Key (existing functionality)
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY}
+      GEMINI_MODEL_NAME: ${GEMINI_MODEL_NAME:-gemini-2.0-flash-exp}
+      # CORS configuration for production
+      CORS_ALLOW_ORIGIN_REGEX: ${CORS_ALLOW_ORIGIN_REGEX:-https://.*}
+      # JWT Authentication
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      JWT_EXPIRATION_MINUTES: ${JWT_EXPIRATION_MINUTES:-43200}
+    networks:
+      - mantis-network
+    ports:
+      - "8001:8000"  # Expose for local testing (remove in production)
+
+  # 3. Frontend Service (Next.js)
+  frontend:
+    build:
+      context: ./mantis
+      dockerfile: Dockerfile
+      args:
+        # Use /api prefix for backend routes (will be proxied via Next.js rewrites)
+        NEXT_PUBLIC_API_BASE_URL: /api
+    container_name: mantis-frontend
+    restart: always
+    depends_on:
+      - backend
+    environment:
+      # Internal backend URL for server-side proxy
+      BACKEND_URL: http://backend:8000
+    networks:
+      - mantis-network
+    ports:
+      - "3000:3000"
+
+  # 4. Access Tunnel (Cloudflare) - Optional for local testing
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: mantis-tunnel
+    restart: always
+    command: tunnel run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN}
+    networks:
+      - mantis-network
+    profiles:
+      - production  # Only start with: docker compose --profile production up
+
+networks:
+  mantis-network:
+    driver: bridge

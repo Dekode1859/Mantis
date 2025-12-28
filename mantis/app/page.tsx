@@ -1,14 +1,16 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { KeyRound, Loader2, RefreshCw, Search, ShieldCheck, ShieldX } from "lucide-react"
+import { Eye, EyeOff, KeyRound, Loader2, RefreshCw, Search, ShieldCheck, ShieldX } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card } from "@/components/ui/card"
 import { Navbar } from "@/components/navbar"
 import { Sidebar } from "@/components/sidebar"
 import { ProductCard } from "@/components/product-card"
+import { ProtectedRoute } from "@/components/auth/ProtectedRoute"
 import { isElectron, resolveBackendBaseUrl } from "@/lib/backend"
+import { getAuthHeaders } from "@/lib/auth"
 import {
   Dialog,
   DialogContent,
@@ -17,6 +19,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 
 type StockStatus = "In Stock" | "Out of Stock" | "Unknown"
 type PriceTrend = "up" | "down" | "flat" | "neutral"
@@ -98,7 +107,22 @@ export default function Home() {
   const [isSavingApiKey, setIsSavingApiKey] = useState(false)
   const [deletingIds, setDeletingIds] = useState<Set<number>>(new Set())
   const [pendingDelete, setPendingDelete] = useState<RenderedProduct | null>(null)
+
+  // Backend health check state
+  const [isTestingBackend, setIsTestingBackend] = useState(false)
+  const [backendHealthStatus, setBackendHealthStatus] = useState<any>(null)
   const [activeTab, setActiveTab] = useState<ActiveTab>("tracker")
+
+  // Provider configuration state
+  const [selectedProvider, setSelectedProvider] = useState<string>("")
+  const [providerApiKey, setProviderApiKey] = useState<string>("")
+  const [selectedModel, setSelectedModel] = useState<string>("")
+  const [availableModels, setAvailableModels] = useState<string[]>([])
+  const [isLoadingModels, setIsLoadingModels] = useState(false)
+  const [isTestingProvider, setIsTestingProvider] = useState(false)
+  const [isSavingProvider, setIsSavingProvider] = useState(false)
+  const [providerTestStatus, setProviderTestStatus] = useState<{status: string, message: string} | null>(null)
+  const [showApiKey, setShowApiKey] = useState(false)
 
   const isElectronEnv = isElectron()
 
@@ -154,7 +178,9 @@ export default function Home() {
       return
     }
     try {
-      const response = await fetch(`${apiBaseUrl}/products`)
+      const response = await fetch(`${apiBaseUrl}/products`, {
+        headers: getAuthHeaders(),
+      })
       if (!response.ok) {
         throw new Error("Failed to load products.")
       }
@@ -249,6 +275,7 @@ export default function Home() {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
+            ...getAuthHeaders(),
           },
           body: JSON.stringify({ url }),
         })
@@ -353,6 +380,7 @@ export default function Home() {
       try {
         const response = await fetch(`${apiBaseUrl}/products/${product.id}`, {
           method: "DELETE",
+          headers: getAuthHeaders(),
         })
         if (!response.ok) {
           let detail = "Failed to delete product."
@@ -453,8 +481,155 @@ export default function Home() {
     [apiKeyInput, isElectronEnv, refreshApiKeyStatus],
   )
 
+  const handleTestBackend = useCallback(async () => {
+    setIsTestingBackend(true)
+    setErrorMessage(null)
+    setBackendHealthStatus(null)
+
+    try {
+      const baseUrl = apiBaseUrl || FALLBACK_BASE_URL
+      const url = `${baseUrl}/health`
+
+      const response = await fetch(url)
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+      }
+
+      const data = await response.json()
+      setBackendHealthStatus(data)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to connect to backend"
+      setErrorMessage(message)
+      console.error("Backend health check failed:", error)
+    } finally {
+      setIsTestingBackend(false)
+    }
+  }, [apiBaseUrl])
+
+  // Load provider configuration on mount
+  useEffect(() => {
+    if (!apiBaseUrl) return
+
+    const loadProviderConfig = async () => {
+      try {
+        const response = await fetch(`${apiBaseUrl}/providers/config`, {
+          headers: getAuthHeaders(),
+        })
+        if (response.ok) {
+          const config = await response.json()
+          if (config) {
+            setSelectedProvider(config.provider_name)
+            setProviderApiKey(config.api_key)
+            setSelectedModel(config.model_name)
+          }
+        }
+      } catch (error) {
+        console.error("Failed to load provider config:", error)
+      }
+    }
+
+    void loadProviderConfig()
+  }, [apiBaseUrl])
+
+  // Fetch models when provider or API key changes
+  const fetchModels = useCallback(async () => {
+    if (!selectedProvider || !providerApiKey || !apiBaseUrl) return
+
+    setIsLoadingModels(true)
+    setAvailableModels([])
+
+    try {
+      const response = await fetch(
+        `${apiBaseUrl}/providers/${selectedProvider}/models?api_key=${encodeURIComponent(providerApiKey)}`
+      )
+
+      if (!response.ok) {
+        throw new Error("Failed to fetch models")
+      }
+
+      const models = await response.json()
+      setAvailableModels(models)
+    } catch (error) {
+      console.error("Failed to fetch models:", error)
+      setErrorMessage("Failed to fetch models. Check your API key.")
+    } finally {
+      setIsLoadingModels(false)
+    }
+  }, [selectedProvider, providerApiKey, apiBaseUrl])
+
+  const handleTestProviderConnection = useCallback(async () => {
+    if (!selectedProvider || !providerApiKey || !selectedModel || !apiBaseUrl) return
+
+    setIsTestingProvider(true)
+    setProviderTestStatus(null)
+
+    try {
+      const response = await fetch(`${apiBaseUrl}/providers/test`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider_name: selectedProvider,
+          api_key: providerApiKey,
+          model_name: selectedModel,
+        }),
+      })
+
+      const data = await response.json()
+
+      if (response.ok) {
+        setProviderTestStatus({ status: "success", message: data.message })
+      } else {
+        setProviderTestStatus({ status: "error", message: data.detail || "Test failed" })
+      }
+    } catch (error) {
+      setProviderTestStatus({
+        status: "error",
+        message: error instanceof Error ? error.message : "Connection test failed",
+      })
+    } finally {
+      setIsTestingProvider(false)
+    }
+  }, [selectedProvider, providerApiKey, selectedModel, apiBaseUrl])
+
+  const handleSaveProviderConfig = useCallback(async () => {
+    if (!selectedProvider || !providerApiKey || !selectedModel || !apiBaseUrl) return
+
+    setIsSavingProvider(true)
+    setProviderTestStatus(null)
+
+    try {
+      const response = await fetch(`${apiBaseUrl}/providers/config`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify({
+          provider_name: selectedProvider,
+          api_key: providerApiKey,
+          model_name: selectedModel,
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error("Failed to save provider configuration")
+      }
+
+      setProviderTestStatus({ status: "success", message: "Configuration saved successfully!" })
+    } catch (error) {
+      setProviderTestStatus({
+        status: "error",
+        message: error instanceof Error ? error.message : "Failed to save configuration",
+      })
+    } finally {
+      setIsSavingProvider(false)
+    }
+  }, [selectedProvider, providerApiKey, selectedModel, apiBaseUrl])
+
   return (
-    <div className="flex h-full flex-col bg-background overflow-hidden">
+    <ProtectedRoute>
+      <div className="flex h-full flex-col bg-background overflow-hidden">
       <Navbar
         onSettingsClick={() => setActiveTab("settings")}
         isSettingsActive={activeTab === "settings"}
@@ -580,81 +755,181 @@ export default function Home() {
               <section className="max-w-2xl mx-auto space-y-6">
                 <header className="space-y-2">
                   <h1 className="text-3xl font-bold tracking-tight text-foreground">Settings</h1>
-                  <p className="text-muted-foreground">Manage your local configuration for the Mantis agent.</p>
+                  <p className="text-muted-foreground">Configure your AI provider for product price extraction.</p>
                 </header>
 
-                {isElectronEnv ? (
-                  <Card className="border-border/50 bg-card/60 p-6 space-y-4">
-                    <div className="flex items-center justify-between">
-                      <h2 className="text-lg font-semibold text-foreground">Google API Key</h2>
-                      {isLoadingKeyStatus ? (
-                        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                      ) : apiKeyStatus?.configured ? (
-                        <span className="flex items-center gap-2 text-sm text-emerald-300">
-                          <ShieldCheck className="h-4 w-4" />
-                          Configured (…{apiKeyStatus.last4 ?? "****"})
-                        </span>
-                      ) : (
-                        <span className="flex items-center gap-2 text-sm text-red-300">
-                          <ShieldX className="h-4 w-4" />
-                          Missing key
-                        </span>
+                {/* AI Provider Configuration Card */}
+                <Card className="border-border/50 bg-card/60 p-6 space-y-4">
+                  <div className="space-y-2">
+                    <h2 className="text-lg font-semibold text-foreground">AI Provider Configuration</h2>
+                    <p className="text-sm text-muted-foreground">
+                      Configure your preferred AI provider for product price extraction.
+                    </p>
+                  </div>
+
+                  <div className="space-y-4">
+                    {/* Provider Selection */}
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-foreground">Provider</label>
+                      <Select
+                        value={selectedProvider}
+                        onValueChange={setSelectedProvider}
+                        disabled={baseUnavailable}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select a provider" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="groq">Groq</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* API Key Input */}
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-foreground">API Key</label>
+                      <div className="relative">
+                        <Input
+                          type={showApiKey ? "text" : "password"}
+                          placeholder="Enter your API key"
+                          value={providerApiKey}
+                          onChange={(e) => setProviderApiKey(e.target.value)}
+                          disabled={!selectedProvider || baseUnavailable}
+                          className="pr-10"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowApiKey(!showApiKey)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                          disabled={!providerApiKey}
+                        >
+                          {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        </button>
+                      </div>
+                      {selectedProvider === "groq" && (
+                        <p className="text-xs text-muted-foreground">
+                          Get your API key from{" "}
+                          <a
+                            href="https://console.groq.com/keys"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-emerald-400 underline-offset-4 hover:underline"
+                          >
+                            Groq Console
+                          </a>
+                        </p>
                       )}
                     </div>
 
-                    <p className="text-sm text-muted-foreground">
-                      Enter your Google API key. Saving will restart the backend so the new key takes effect.{" "}
-                      <a
-                        href="https://aistudio.google.com/apikey"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-emerald-400 underline-offset-4 hover:underline"
+                    {/* Load Models Button */}
+                    {selectedProvider && providerApiKey && (
+                      <Button
+                        onClick={fetchModels}
+                        disabled={isLoadingModels || baseUnavailable}
+                        variant="outline"
+                        className="w-full"
                       >
-                        Get an API key from Google AI Studio.
-                      </a>
-                    </p>
+                        {isLoadingModels ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Loading Models...
+                          </>
+                        ) : (
+                          "Load Available Models"
+                        )}
+                      </Button>
+                    )}
 
-                    <form className="space-y-3" onSubmit={handleSaveApiKey}>
-                      <Input
-                        type="password"
-                        placeholder="Enter your Google API key"
-                        value={apiKeyInput}
-                        onChange={(event) => setApiKeyInput(event.target.value)}
-                      />
-                      <div className="flex items-center gap-3">
-                        <Button
-                          type="submit"
-                          className="bg-emerald-600 hover:bg-emerald-700 text-white"
-                          disabled={!apiKeyInput.trim() || isSavingApiKey}
+                    {/* Model Selection */}
+                    {availableModels.length > 0 && (
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium text-foreground">Model</label>
+                        <Select
+                          value={selectedModel}
+                          onValueChange={setSelectedModel}
+                          disabled={baseUnavailable}
                         >
-                          {isSavingApiKey ? (
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select a model" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {availableModels.map((model) => (
+                              <SelectItem key={model} value={model}>
+                                {model}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+
+                    {/* Action Buttons */}
+                    {selectedProvider && providerApiKey && selectedModel && (
+                      <div className="flex gap-3">
+                        <Button
+                          onClick={handleTestProviderConnection}
+                          disabled={isTestingProvider || baseUnavailable}
+                          variant="outline"
+                          className="flex-1"
+                        >
+                          {isTestingProvider ? (
                             <>
                               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                              Saving…
+                              Testing...
                             </>
                           ) : (
-                            "Save Key"
+                            <>
+                              <ShieldCheck className="mr-2 h-4 w-4" />
+                              Test Connection
+                            </>
                           )}
                         </Button>
+
                         <Button
-                          type="button"
-                          variant="outline"
-                          className="border-border/60 text-muted-foreground hover:text-foreground"
-                          onClick={() => void refreshApiKeyStatus()}
-                          disabled={isLoadingKeyStatus}
+                          onClick={handleSaveProviderConfig}
+                          disabled={isSavingProvider || baseUnavailable}
+                          className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white"
                         >
-                          <RefreshCw className="mr-2 h-4 w-4" />
-                          Check Status
+                          {isSavingProvider ? (
+                            <>
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              Saving...
+                            </>
+                          ) : (
+                            "Save Configuration"
+                          )}
                         </Button>
                       </div>
-                    </form>
-                  </Card>
-                ) : (
-                  <Card className="border-border/50 bg-card/60 p-6 space-y-3 text-center text-sm text-muted-foreground">
-                    <p>Settings are available when you run Mantis through the desktop bundle.</p>
-                    <p>Launch the Electron app to link your Google API key and manage local preferences.</p>
-                  </Card>
-                )}
+                    )}
+
+                    {/* Status Messages */}
+                    {providerTestStatus && (
+                      <div
+                        className={`rounded-lg border p-4 ${
+                          providerTestStatus.status === "success"
+                            ? "border-emerald-500/40 bg-emerald-500/10"
+                            : "border-red-500/40 bg-red-500/10"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          {providerTestStatus.status === "success" ? (
+                            <ShieldCheck className="h-5 w-5 text-emerald-400" />
+                          ) : (
+                            <ShieldX className="h-5 w-5 text-red-400" />
+                          )}
+                          <span
+                            className={`font-medium ${
+                              providerTestStatus.status === "success" ? "text-emerald-300" : "text-red-300"
+                            }`}
+                          >
+                            {providerTestStatus.status === "success" ? "Success" : "Error"}
+                          </span>
+                        </div>
+                        <p className="text-sm text-muted-foreground mt-2">{providerTestStatus.message}</p>
+                      </div>
+                    )}
+                  </div>
+                </Card>
               </section>
             )}
 
@@ -717,5 +992,6 @@ export default function Home() {
         </DialogContent>
       </Dialog>
     </div>
+    </ProtectedRoute>
   )
 }

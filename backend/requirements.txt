@@ -12,3 +12,9 @@ apscheduler==3.10.4
 aiofiles==23.2.1
 python-dotenv==1.0.1
 pyinstaller==6.17.0
+psycopg2-binary==2.9.9
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+bcrypt==4.1.2
+python-multipart==0.0.6
+pydantic[email]==2.12.5
