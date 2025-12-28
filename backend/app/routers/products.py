@@ -9,17 +9,18 @@ import asyncio
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
+from ..auth.utils import get_current_active_user
+from ..database import get_db
+from ..models import PriceHistory, Product, User
 from ..schemas import (
     ProductFetchRequest,
     ProductFetchResponse,
     TrackedProductSchema,
 )
-from ..database import get_db
-from ..models import PriceHistory, Product
 from ..services.agent import extract_product_data
+from ..services.refresh import refresh_all_products
 from ..services.scraper import fetch_page_content
 from ..utils.time import now_local
-from ..services.refresh import refresh_all_products
 
 router = APIRouter(prefix="/products", tags=["products"])
 
@@ -63,6 +64,7 @@ def _serialize_tracked_product(db: Session, product: Product) -> TrackedProductS
 async def fetch_product_page(
     payload: ProductFetchRequest,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ) -> ProductFetchResponse:
     """
     Accepts a product URL and returns the rendered page HTML.
@@ -88,9 +90,16 @@ async def fetch_product_page(
         except ValueError:
             domain = None
 
-    product = db.query(Product).filter(Product.url == normalized_url).first()
+    product = db.query(Product).filter(
+        Product.url == normalized_url,
+        Product.user_id == current_user.id
+    ).first()
     if product is None:
-        product = Product(url=normalized_url, created_at=now)
+        product = Product(
+            url=normalized_url,
+            user_id=current_user.id,
+            created_at=now
+        )
         db.add(product)
 
     product.title = structured.title
@@ -116,11 +125,14 @@ async def fetch_product_page(
 
 
 @router.get("", response_model=list[TrackedProductSchema])
-def list_products(db: Session = Depends(get_db)) -> list[TrackedProductSchema]:
+def list_products(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> list[TrackedProductSchema]:
     """
-    Return the latest tracked state for all products.
+    Return the latest tracked state for all products belonging to the current user.
     """
-    products = db.query(Product).all()
+    products = db.query(Product).filter(Product.user_id == current_user.id).all()
     tracked: list[TrackedProductSchema] = []
     for product in products:
         try:
@@ -142,13 +154,24 @@ async def trigger_refresh_all_products() -> Response:
 
 
 @router.delete("/{product_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_product(product_id: int, db: Session = Depends(get_db)) -> Response:
+def delete_product(
+    product_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> Response:
     """
     Permanently delete a tracked product and its price history.
+    Only the owner can delete their products.
     """
-    product = db.query(Product).filter(Product.id == product_id).first()
+    product = db.query(Product).filter(
+        Product.id == product_id,
+        Product.user_id == current_user.id
+    ).first()
     if product is None:
-        raise HTTPException(status_code=404, detail="Product not found.")
+        raise HTTPException(
+            status_code=404,
+            detail="Product not found or you don't have permission to delete it."
+        )
 
     db.delete(product)
     db.commit()

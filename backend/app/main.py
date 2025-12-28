@@ -35,7 +35,8 @@ DEFAULT_DB_PATH = APP_DATA_DIR / "mantis.db"
 os.environ.setdefault("MANTIS_DB_PATH", str(DEFAULT_DB_PATH))
 
 from .database import Base, engine, reconfigure_database  # noqa: E402
-from .routers import products  # noqa: E402
+from .models import Product, PriceHistory, ProviderConfig, User  # noqa: E402, F401
+from .routers import auth, products, providers  # noqa: E402
 from .services.refresh import refresh_all_products  # noqa: E402
 
 
@@ -46,6 +47,7 @@ default_origins = [
     "http://127.0.0.1:3000",
     "http://localhost:3001",
     "http://127.0.0.1:3001",
+    "http://192.168.1.51:3000",
 ]
 env_origins = os.getenv("CORS_ALLOW_ORIGINS")
 allow_origins = (
@@ -54,15 +56,22 @@ allow_origins = (
     else default_origins
 )
 
+# Allow all origins in production when using Cloudflare tunnel
+# This is safe because Cloudflare provides the security layer
+allow_origin_regex = os.getenv("CORS_ALLOW_ORIGIN_REGEX")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allow_origins,
+    allow_origins=allow_origins if not allow_origin_regex else ["*"],
+    allow_origin_regex=allow_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+app.include_router(auth.router)
 app.include_router(products.router)
+app.include_router(providers.router)
 
 scheduler = AsyncIOScheduler(timezone=get_local_timezone())
 
@@ -70,6 +79,9 @@ scheduler = AsyncIOScheduler(timezone=get_local_timezone())
 @app.on_event("startup")
 async def start_scheduler() -> None:
     """Start the background scheduler for periodic refreshes."""
+    # Create database tables if they don't exist
+    Base.metadata.create_all(bind=engine)
+
     if not scheduler.get_job("refresh-all-products"):
         scheduler.add_job(
             refresh_all_products,
@@ -93,8 +105,40 @@ async def shutdown_scheduler() -> None:
 
 @app.get("/health")
 async def healthcheck():
-    """Simple health endpoint for uptime checks."""
-    return {"status": "ok"}
+    """Health endpoint with database connectivity test."""
+    from sqlalchemy import text
+    from .database import SessionLocal
+
+    db_status = "unknown"
+    db_type = "unknown"
+
+    try:
+        db = SessionLocal()
+        # Test database connection
+        db.execute(text("SELECT 1"))
+        db.close()
+        db_status = "connected"
+
+        # Detect database type from DATABASE_URL
+        db_url = os.getenv("DATABASE_URL") or os.getenv("MANTIS_DB_PATH", "")
+        if "postgresql" in db_url:
+            db_type = "PostgreSQL"
+        elif "sqlite" in db_url or db_url.endswith(".db"):
+            db_type = "SQLite"
+        else:
+            db_type = "Unknown"
+
+    except Exception as e:
+        db_status = f"error: {str(e)}"
+
+    return {
+        "status": "ok",
+        "database": {
+            "status": db_status,
+            "type": db_type
+        },
+        "environment": "docker" if os.getenv("DATABASE_URL") else "local"
+    }
 
 
 def _find_free_port(host: str) -> int:

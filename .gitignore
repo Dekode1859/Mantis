@@ -1,3 +1,36 @@
 *_*.md
 .venv
 notebooks/
+
+# Docker
+.env
+postgres_data/
+.dockerignore
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# Node
+node_modules/
+.next/
+out/
+.vercel
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
