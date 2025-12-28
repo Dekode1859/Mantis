@@ -1,8 +1,8 @@
 # Mantis Price Tracker
 
-A cloud-native, AI-powered multi-tenant product tracker that scrapes e‑commerce pages, runs a LangChain agent over the DOM, and keeps price history — all with secure user authentication and data isolation. Built to show what production-ready AI automation looks like with modern web deployment.
+A cloud-native, AI-powered multi-tenant product tracker that scrapes e‑commerce pages, runs a LangChain agent over the DOM, and keeps price history — all with secure user authentication and data isolation. Built to show what production-ready AI automation looks like with modern web deployment. [Try it out!](https://mantis.dekode.live)
 
-![Mantis screenshot](mantis/public/mantis-app.png)
+<img src="mantis/public/mantis-app.png" alt="Mantis screenshot" width="NaN" height="NaN">
 
 ## Why It Matters
 
@@ -36,6 +36,7 @@ A cloud-native, AI-powered multi-tenant product tracker that scrapes e‑commerc
 ## Key Features
 
 ### Authentication & Multi-Tenancy
+
 - **Secure user accounts** – Email/password registration with JWT token authentication (30-day expiration).
 - **Protected routes** – All application features require authentication; automatic redirection to login.
 - **Smart login flow** – If an email isn't found during login, automatically redirects to signup with email pre-filled.
@@ -43,6 +44,7 @@ A cloud-native, AI-powered multi-tenant product tracker that scrapes e‑commerc
 - **Password security** – Bcrypt hashing with minimum 8-character requirement.
 
 ### Product Tracking
+
 - Track any product by pasting a URL; agent returns title, price, currency, stock state, source domain.
 - Automatically stores product metadata and every price point in PostgreSQL with trend analysis.
 - Daily auto-refresh (every six hours) keeps prices fresh; manual refresh for individual cards or the entire collection.
@@ -88,6 +90,7 @@ cp .env.example .env
 ```
 
 Required variables:
+
 - `DB_USER` and `DB_PASSWORD` – PostgreSQL credentials
 - `GOOGLE_API_KEY` – Google Gemini API key for AI agent
 - `JWT_SECRET_KEY` – Generate with: `python -c "import secrets; print(secrets.token_urlsafe(32))"`
@@ -110,6 +113,7 @@ docker compose up -d --build
 ```
 
 This starts:
+
 - **PostgreSQL** (port 5432) – Database with health checks
 - **FastAPI Backend** (port 8001) – API server with JWT auth
 - **Next.js Frontend** (port 3000) – Web UI with authentication
@@ -125,6 +129,7 @@ First-time users will be redirected to `/register` to create an account.
 ## Authentication Flow
 
 ### Registration
+
 1. User enters email, password (min 8 chars), and optional name at `/register`
 2. Backend hashes password with bcrypt and stores user in PostgreSQL
 3. JWT token generated with 30-day expiration
@@ -132,12 +137,14 @@ First-time users will be redirected to `/register` to create an account.
 5. User redirected to dashboard
 
 ### Login
+
 1. User enters email and password at `/login`
 2. If email not found, **automatically redirects to `/register?email=user@example.com`** with email pre-filled
 3. If credentials valid, JWT token generated and stored
 4. User redirected to dashboard
 
 ### Protected Routes
+
 - All dashboard routes wrapped in `<ProtectedRoute>` component
 - Checks for valid JWT token on mount
 - Redirects to `/login` if unauthenticated
@@ -193,10 +200,12 @@ npm run dev
 ## API Documentation
 
 Once deployed, interactive API docs available at:
+
 - Swagger UI: http://localhost:8001/docs
 - ReDoc: http://localhost:8001/redoc
 
 Key endpoints:
+
 - `POST /auth/register` – Create new user account
 - `POST /auth/login` – Authenticate and get JWT token
 - `GET /auth/me` – Get current user info (requires auth)
@@ -222,4 +231,3 @@ See [CHANGELOG.md](./CHANGELOG.md) for a versioned history of notable updates.
 ---
 
 **Built to demonstrate end-to-end AI agent craftsmanship** — from scraping resilience and prompt design to multi-tenant SaaS deployment with authentication, database design, and production hardening. A complete full-stack showcase from prototype to polished cloud-native product. 🚀
-

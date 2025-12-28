@@ -6,6 +6,7 @@ import { useAuth } from "@/contexts/AuthContext"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { MantisLogo } from "@/components/auth/MantisLogo"
 import Link from "next/link"
 
 export function RegisterForm() {
@@ -59,6 +60,8 @@ export function RegisterForm() {
 
   return (
     <div className="w-full max-w-md space-y-6">
+      <MantisLogo />
+
       <div className="space-y-2 text-center">
         <h1 className="text-3xl font-bold">Create Account</h1>
         <p className="text-muted-foreground">
