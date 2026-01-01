@@ -12,6 +12,10 @@ export const metadata: Metadata = {
   title: "Mantis - Price Tracker",
   description: "Local-first price tracking app",
   generator: "v0.app",
+  icons: {
+    icon: "/mantis-icon.png",
+    apple: "/mantis-icon.png",
+  },
 }
 
 export default function RootLayout({

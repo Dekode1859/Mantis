@@ -1,8 +1,17 @@
 import { useCallback, useEffect, useState } from "react"
-import { Copy, Minus, Settings, Square, X } from "lucide-react"
+import { Copy, LogOut, Minus, Settings, Square, User, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { isElectron } from "@/lib/backend"
+import { useAuth } from "@/contexts/AuthContext"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 
 interface NavbarProps {
   onSettingsClick?: () => void
@@ -12,6 +21,23 @@ interface NavbarProps {
 export function Navbar({ onSettingsClick, isSettingsActive }: NavbarProps) {
   const [isMaximized, setIsMaximized] = useState(false)
   const isElectronEnv = isElectron()
+  const { user, logout } = useAuth()
+
+  // Get user initials for avatar fallback
+  const getUserInitials = () => {
+    if (user?.name) {
+      return user.name
+        .split(" ")
+        .map((n) => n[0])
+        .join("")
+        .toUpperCase()
+        .slice(0, 2)
+    }
+    if (user?.email) {
+      return user.email[0].toUpperCase()
+    }
+    return "U"
+  }
 
   useEffect(() => {
     if (!isElectronEnv || !window.electronAPI) {
@@ -60,16 +86,43 @@ export function Navbar({ onSettingsClick, isSettingsActive }: NavbarProps) {
           <div className="text-lg font-mono font-bold text-emerald-400">{">"} mantis_</div>
         </div>
         <div className="flex items-center gap-1">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="app-no-drag text-muted-foreground hover:text-foreground"
-            onClick={onSettingsClick}
-            aria-label="Open settings"
-            data-state={isSettingsActive ? "active" : "inactive"}
-          >
-            <Settings className="h-5 w-5" />
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                className="app-no-drag relative h-8 w-8 rounded-full"
+                aria-label="User menu"
+              >
+                <Avatar className="h-8 w-8">
+                  <AvatarFallback className="bg-emerald-600 text-white text-xs font-semibold">
+                    {getUserInitials()}
+                  </AvatarFallback>
+                </Avatar>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <div className="flex items-center justify-start gap-2 p-2">
+                <div className="flex flex-col space-y-1">
+                  {user?.name && (
+                    <p className="text-sm font-medium leading-none">{user.name}</p>
+                  )}
+                  <p className="text-xs leading-none text-muted-foreground">
+                    {user?.email}
+                  </p>
+                </div>
+              </div>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={onSettingsClick}>
+                <Settings className="mr-2 h-4 w-4" />
+                <span>Settings</span>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => logout()}>
+                <LogOut className="mr-2 h-4 w-4" />
+                <span>Logout</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           {isElectronEnv && (
             <div className="ml-1 flex h-full">
               <button

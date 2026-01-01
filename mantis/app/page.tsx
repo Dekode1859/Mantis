@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { Eye, EyeOff, KeyRound, Loader2, RefreshCw, Search, ShieldCheck, ShieldX } from "lucide-react"
+import { Eye, EyeOff, KeyRound, Loader2, Plus, RefreshCw, Search, ShieldCheck, ShieldX } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card } from "@/components/ui/card"
@@ -9,8 +9,10 @@ import { Navbar } from "@/components/navbar"
 import { Sidebar } from "@/components/sidebar"
 import { ProductCard } from "@/components/product-card"
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute"
+import { DeleteAccountDialog } from "@/components/settings/DeleteAccountDialog"
 import { isElectron, resolveBackendBaseUrl } from "@/lib/backend"
-import { getAuthHeaders } from "@/lib/auth"
+import { getAuthHeaders, getCurrentUser, type User } from "@/lib/auth"
+import { Skeleton } from "@/components/ui/skeleton"
 import {
   Dialog,
   DialogContent,
@@ -97,6 +99,7 @@ export default function Home() {
   const [inputValue, setInputValue] = useState("")
   const [isScanning, setIsScanning] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [user, setUser] = useState<User | null>(null)
 
   const [apiBaseUrl, setApiBaseUrl] = useState<string | null>(null)
   const [isResolvingBase, setIsResolvingBase] = useState(true)
@@ -107,6 +110,9 @@ export default function Home() {
   const [isSavingApiKey, setIsSavingApiKey] = useState(false)
   const [deletingIds, setDeletingIds] = useState<Set<number>>(new Set())
   const [pendingDelete, setPendingDelete] = useState<RenderedProduct | null>(null)
+  const [trackNewDialogOpen, setTrackNewDialogOpen] = useState(false)
+  const [trackNewUrl, setTrackNewUrl] = useState("")
+  const [loadingProducts, setLoadingProducts] = useState<Set<string>>(new Set())
 
   // Backend health check state
   const [isTestingBackend, setIsTestingBackend] = useState(false)
@@ -257,6 +263,15 @@ export default function Home() {
     }
   }, [activeTab, isElectronEnv, refreshApiKeyStatus])
 
+  // Fetch user data when settings tab is active
+  useEffect(() => {
+    if (activeTab === "settings" && !user) {
+      getCurrentUser()
+        .then((userData) => setUser(userData))
+        .catch((error) => console.error("Failed to fetch user:", error))
+    }
+  }, [activeTab, user])
+
   const handleTrack = useCallback(
     async (urlParam?: string) => {
       const url = (urlParam ?? inputValue).trim()
@@ -364,6 +379,101 @@ export default function Home() {
     [handleTrack, products],
   )
 
+  const handleTrackNewWithOptimisticUI = useCallback(
+    async () => {
+      const url = trackNewUrl.trim()
+      if (!url || !apiBaseUrl) {
+        return
+      }
+
+      // Close the dialog immediately
+      setTrackNewDialogOpen(false)
+      setTrackNewUrl("")
+
+      // Add to loading set with a temporary ID
+      const tempId = `loading-${Date.now()}`
+      setLoadingProducts((prev) => new Set(prev).add(tempId))
+
+      try {
+        const response = await fetch(`${apiBaseUrl}/products/fetch`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...getAuthHeaders(),
+          },
+          body: JSON.stringify({ url }),
+        })
+
+        if (!response.ok) {
+          let detail = "Failed to fetch product information."
+          try {
+            const errorPayload = (await response.json()) as { detail?: string }
+            if (errorPayload.detail) {
+              detail = errorPayload.detail
+            }
+          } catch {
+            // ignore JSON parse errors
+          }
+          throw new Error(detail)
+        }
+
+        const payload = (await response.json()) as ProductExtractionResponse
+        if (!payload.structured) {
+          throw new Error("The agent did not return structured data for this URL.")
+        }
+
+        // Remove from loading set
+        setLoadingProducts((prev) => {
+          const next = new Set(prev)
+          next.delete(tempId)
+          return next
+        })
+
+        if (payload.product) {
+          const hydrated = hydrateProduct(payload.product)
+          setProducts((prev) => {
+            const withoutExisting = prev.filter((item) => item.id !== hydrated.id)
+            return [hydrated, ...withoutExisting]
+          })
+        } else {
+          const structured = payload.structured
+          if (structured) {
+            const hydrated: TrackedProduct = {
+              id: Date.now(),
+              url,
+              title: structured.title,
+              price: structured.price,
+              currency: structured.currency,
+              stockStatus: structured.stock_status ?? "Unknown",
+              website: structured.website ?? undefined,
+              lastChecked: new Date().toISOString(),
+              previousPrice: null,
+              previousCurrency: null,
+              lowestPrice: null,
+              lowestCurrency: null,
+              lowestTimestamp: null,
+              isRefreshing: false,
+            }
+            setProducts((prev) => {
+              const withoutExisting = prev.filter((item) => item.url !== hydrated.url)
+              return [hydrated, ...withoutExisting]
+            })
+          }
+        }
+      } catch (error) {
+        // Remove from loading set on error
+        setLoadingProducts((prev) => {
+          const next = new Set(prev)
+          next.delete(tempId)
+          return next
+        })
+        const message = error instanceof Error ? error.message : "Something went wrong."
+        setErrorMessage(message)
+      }
+    },
+    [apiBaseUrl, hydrateProduct, trackNewUrl],
+  )
+
   const performDelete = useCallback(
     async (product: RenderedProduct | null) => {
       if (!apiBaseUrl || !product) {
@@ -452,6 +562,28 @@ export default function Home() {
   }, [products, formatPrice])
 
   const baseUnavailable = isResolvingBase || !apiBaseUrl
+
+  // Loading skeleton component
+  const LoadingSkeleton = () => (
+    <Card className="overflow-hidden border-border/50 bg-card/50 h-full flex flex-col animate-pulse">
+      <div className="p-5 space-y-4 flex-1">
+        <div className="flex items-start justify-between gap-3">
+          <div className="space-y-2 flex-1">
+            <Skeleton className="h-5 w-3/4 bg-muted/50" />
+            <Skeleton className="h-3 w-1/2 bg-muted/50" />
+          </div>
+          <Skeleton className="h-8 w-20 bg-muted/50" />
+        </div>
+        <div className="space-y-2">
+          <Skeleton className="h-4 w-full bg-muted/50" />
+          <Skeleton className="h-4 w-2/3 bg-muted/50" />
+        </div>
+        <div className="flex items-center justify-center py-4">
+          <Loader2 className="h-8 w-8 animate-spin text-emerald-400" />
+        </div>
+      </div>
+    </Card>
+  )
 
   const handleSaveApiKey = useCallback(
     async (event: React.FormEvent) => {
@@ -648,106 +780,130 @@ export default function Home() {
                   </div>
                 )}
 
-                <section className="max-w-2xl mx-auto space-y-6">
-                  <header className="space-y-4">
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="space-y-2 text-center sm:text-left">
-                        <h1 className="text-3xl font-bold tracking-tight text-foreground">Track Product Prices</h1>
-                        <p className="text-muted-foreground">
-                          Paste a product URL and let the agent extract price, availability, and metadata.
-                        </p>
-                      </div>
-                      {isElectronEnv && (
-                        <div className="flex items-center justify-center sm:justify-end">
-                          {isLoadingKeyStatus ? (
-                            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" aria-label="Loading key status" />
-                          ) : (
-                            <KeyRound
-                              className={`h-5 w-5 ${apiKeyStatus?.configured ? "text-emerald-400" : "text-red-400"}`}
-                              aria-label={apiKeyStatus?.configured ? "API key configured" : "API key missing"}
-                            />
-                          )}
+                {/* State A: No products - Show centered search bar */}
+                {renderedProducts.length === 0 && (
+                  <section className="max-w-2xl mx-auto space-y-6">
+                    <header className="space-y-4">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="space-y-2 text-center sm:text-left">
+                          <h1 className="text-3xl font-bold tracking-tight text-foreground">Track Product Prices</h1>
+                          <p className="text-muted-foreground">
+                            Paste a product URL and let the agent extract price, availability, and metadata.
+                          </p>
                         </div>
-                      )}
+                        {isElectronEnv && (
+                          <div className="flex items-center justify-center sm:justify-end">
+                            {isLoadingKeyStatus ? (
+                              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" aria-label="Loading key status" />
+                            ) : (
+                              <KeyRound
+                                className={`h-5 w-5 ${apiKeyStatus?.configured ? "text-emerald-400" : "text-red-400"}`}
+                                aria-label={apiKeyStatus?.configured ? "API key configured" : "API key missing"}
+                              />
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </header>
+
+                    <div className="flex flex-col sm:flex-row gap-3">
+                      <Input
+                        placeholder="Paste Product URL..."
+                        value={inputValue}
+                        onChange={(event) => setInputValue(event.target.value)}
+                        onKeyDown={(event) => event.key === "Enter" && void handleTrack()}
+                        className="bg-card/50 border-border/50 placeholder:text-muted-foreground/50"
+                        disabled={isScanning || baseUnavailable}
+                      />
+                      <Button
+                        onClick={() => void handleTrack()}
+                        disabled={isScanning || !inputValue.trim() || baseUnavailable}
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white px-8"
+                      >
+                        {isScanning ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                            Prowling…
+                          </>
+                        ) : (
+                          <>
+                            <Search className="h-4 w-4 mr-2" />
+                            Track
+                          </>
+                        )}
+                      </Button>
                     </div>
-                  </header>
 
-                  <div className="flex flex-col sm:flex-row gap-3">
-                    <Input
-                      placeholder="Paste Product URL..."
-                      value={inputValue}
-                      onChange={(event) => setInputValue(event.target.value)}
-                      onKeyDown={(event) => event.key === "Enter" && void handleTrack()}
-                      className="bg-card/50 border-border/50 placeholder:text-muted-foreground/50"
-                      disabled={isScanning || baseUnavailable}
-                    />
-                    <Button
-                      onClick={() => void handleTrack()}
-                      disabled={isScanning || !inputValue.trim() || baseUnavailable}
-                      className="bg-emerald-600 hover:bg-emerald-700 text-white px-8"
-                    >
-                      {isScanning ? (
-                        <>
-                          <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                          Prowling…
-                        </>
-                      ) : (
-                        <>
-                          <Search className="h-4 w-4 mr-2" />
-                          Track
-                        </>
-                      )}
-                    </Button>
-                  </div>
+                    {isScanning && (
+                      <div className="rounded-lg border border-emerald-600/40 bg-emerald-600/10 px-4 py-3 text-sm text-emerald-300">
+                        Agent prowling… give it a moment while we render the page and extract structured data.
+                      </div>
+                    )}
 
-                  {isScanning && (
-                    <div className="rounded-lg border border-emerald-600/40 bg-emerald-600/10 px-4 py-3 text-sm text-emerald-300">
-                      Agent prowling… give it a moment while we render the page and extract structured data.
-                    </div>
-                  )}
+                    {errorMessage && (
+                      <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+                        {errorMessage}
+                      </div>
+                    )}
 
-                  {errorMessage && (
-                    <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-300">
-                      {errorMessage}
-                    </div>
-                  )}
-                </section>
-
-                <section className="space-y-6">
-                  <div className="flex items-center justify-between">
-                    <h2 className="text-xl font-semibold text-foreground">Tracked Products</h2>
-                    <span className="text-sm text-muted-foreground">{renderedProducts.length} items</span>
-                  </div>
-
-                  {renderedProducts.length === 0 ? (
                     <div className="rounded-xl border border-dashed border-border/60 bg-card/30 p-12 text-center text-sm text-muted-foreground">
                       Nothing tracked yet. Add a product URL above to see it appear here.
                     </div>
-                  ) : (
-                    <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-3">
-                      {renderedProducts.map((product) => (
-                        <ProductCard
-                          key={product.id}
-                          title={product.title}
-                          priceLabel={product.priceLabel}
-                          stockStatus={product.stockStatus}
-                          website={product.website}
-                          url={product.url}
-                          lastChecked={product.lastChecked}
-                          previousPriceLabel={product.previousPriceLabel}
-                          differenceLabel={product.differenceLabel}
-                          trend={product.trend}
-                          isLowest={product.isLowest}
-                          lowestPriceLabel={product.lowestPriceLabel}
-                          onRefresh={() => void handleRefresh(product.id)}
-                          isRefreshing={product.isRefreshing ?? false}
-                          onDelete={() => setPendingDelete(product)}
-                          isDeleting={deletingIds.has(product.id)}
-                        />
-                      ))}
-                    </div>
-                  )}
-                </section>
+                  </section>
+                )}
+
+                {/* State B: Has products - Show header with Track New button */}
+                {renderedProducts.length > 0 && (
+                  <>
+                    <section className="space-y-6">
+                      <div className="flex items-center justify-between">
+                        <h2 className="text-2xl font-bold text-foreground">Tracked Products</h2>
+                        <Button
+                          onClick={() => setTrackNewDialogOpen(true)}
+                          className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                        >
+                          <Plus className="h-4 w-4 mr-2" />
+                          Track New
+                        </Button>
+                      </div>
+
+                      {errorMessage && (
+                        <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+                          {errorMessage}
+                        </div>
+                      )}
+
+                      <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-3">
+                        {/* Loading skeletons for optimistic UI */}
+                        {Array.from(loadingProducts).map((loadingId) => (
+                          <LoadingSkeleton key={loadingId} />
+                        ))}
+
+                        {/* Actual product cards */}
+                        {renderedProducts.map((product) => (
+                          <ProductCard
+                            key={product.id}
+                            title={product.title}
+                            priceLabel={product.priceLabel}
+                            stockStatus={product.stockStatus}
+                            website={product.website}
+                            url={product.url}
+                            lastChecked={product.lastChecked}
+                            previousPriceLabel={product.previousPriceLabel}
+                            differenceLabel={product.differenceLabel}
+                            trend={product.trend}
+                            isLowest={product.isLowest}
+                            lowestPriceLabel={product.lowestPriceLabel}
+                            onRefresh={() => void handleRefresh(product.id)}
+                            isRefreshing={product.isRefreshing ?? false}
+                            onDelete={() => setPendingDelete(product)}
+                            isDeleting={deletingIds.has(product.id)}
+                          />
+                        ))}
+                      </div>
+                    </section>
+                  </>
+                )}
               </>
             )}
 
@@ -930,6 +1086,26 @@ export default function Home() {
                     )}
                   </div>
                 </Card>
+
+                {/* Danger Zone */}
+                <Card className="border-destructive/50 bg-card/60 p-6 space-y-4">
+                  <div className="space-y-2">
+                    <h2 className="text-lg font-semibold text-destructive">Danger Zone</h2>
+                    <p className="text-sm text-muted-foreground">
+                      Irreversible and destructive actions
+                    </p>
+                  </div>
+
+                  <div className="flex items-center justify-between p-4 border border-destructive/30 rounded-lg bg-destructive/5">
+                    <div>
+                      <h3 className="font-medium text-foreground">Delete Account</h3>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        Permanently delete your account and all associated data
+                      </p>
+                    </div>
+                    <DeleteAccountDialog userEmail={user?.email || ""} />
+                  </div>
+                </Card>
               </section>
             )}
 
@@ -945,6 +1121,7 @@ export default function Home() {
           </div>
         </main>
       </div>
+      {/* Delete Confirmation Dialog */}
       <Dialog
         open={Boolean(pendingDelete)}
         onOpenChange={(open) => {
@@ -987,6 +1164,53 @@ export default function Home() {
               ) : (
                 "Delete Product"
               )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Track New Product Dialog */}
+      <Dialog
+        open={trackNewDialogOpen}
+        onOpenChange={(open) => {
+          setTrackNewDialogOpen(open)
+          if (!open) {
+            setTrackNewUrl("")
+          }
+        }}
+      >
+        <DialogContent className="backdrop-blur-sm">
+          <DialogHeader>
+            <DialogTitle>Track New Product</DialogTitle>
+            <DialogDescription>
+              Enter the product URL to start tracking its price and availability.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <Input
+              placeholder="Paste Product URL..."
+              value={trackNewUrl}
+              onChange={(e) => setTrackNewUrl(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && void handleTrackNewWithOptimisticUI()}
+              className="bg-card/50 border-border/50 placeholder:text-muted-foreground/50"
+              autoFocus
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setTrackNewDialogOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => void handleTrackNewWithOptimisticUI()}
+              disabled={!trackNewUrl.trim() || baseUnavailable}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+            >
+              <Search className="h-4 w-4 mr-2" />
+              Track
             </Button>
           </DialogFooter>
         </DialogContent>
