@@ -2,6 +2,48 @@
 
 All notable changes to this project will be documented in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+> **Note**: Features marked with 🤖 were implemented with assistance from AI coding agents (Claude Code).
+
+## [1.1.0] - 2026-01-01 🤖
+### Added
+- **Email Verification System**: Two-step OTP-based registration flow with email verification required before login.
+  - `POST /auth/signup-initiate` - Send 6-digit OTP to email
+  - `POST /auth/verify-otp` - Verify OTP and create account
+  - Professional email templates using Resend service
+  - Cryptographically secure OTP generation with 10-minute expiration
+- **Secure Account Deletion**: Two-step account deletion with email confirmation to prevent accidental data loss.
+  - `POST /auth/delete-initiate` - Send deletion OTP to email
+  - `DELETE /auth/delete-confirm` - Verify OTP and permanently delete account
+  - Warning emails with comprehensive data deletion notices
+  - Cascade deletes for all user data (products, price history, API keys)
+- **Redis Integration**: OTP storage with automatic TTL-based expiration for security.
+- **Settings Page**: User profile management with Settings tab in navbar.
+  - User avatar dropdown menu with profile and logout
+  - Account deletion danger zone with security warnings
+- **UI Components**: Added shadcn/ui components for enhanced UX.
+  - OTP input component with 6-digit code entry
+  - Avatar component for user profile display
+  - Dropdown menu for navigation
+  - Skeleton loaders for better loading states
+- **Database Migration**: Added `is_verified` field to User model for email verification status.
+
+### Changed
+- **Registration Flow**: Migrated from direct registration to two-step email verification (OTP-based).
+- **Login Requirements**: Email verification now required before users can access the application.
+- **Email Configuration**: Updated from test email (`onboarding@resend.dev`) to verified domain (`mantis-verify@dekode.live`).
+
+### Security
+- **OTP Security**: Time-limited verification codes with automatic Redis cleanup.
+- **Email Verification**: Required email ownership proof before account activation.
+- **Account Deletion Safety**: Two-factor confirmation prevents accidental account deletion.
+- **Data Permanence**: Clear warnings about irreversible account deletion and data loss.
+
+### Technical Details
+- Dependencies added: `redis==5.0.1`, `resend==0.8.0`
+- Docker Compose: Added Redis service for OTP storage
+- Resend email service integration with domain verification
+- Reusable OTP system for both registration and deletion flows
+
 ## [1.0.1] - 2025-12-29
 ### Added
 - **Animated Mantis Logo**: Terminal-style logo (`> mantis_`) with purple gradient shine animation on login and register pages.

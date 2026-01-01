@@ -12,6 +12,8 @@ A cloud-native, AI-powered multi-tenant product tracker that scrapes e‑commerc
 - **Resilient automation** – Six-hour APScheduler refreshes, per-product manual refresh, lowest-price tracking, trend deltas, timezone-aware timestamps.
 - **Modern web experience** – Responsive Next.js UI with authentication flows, protected routes, and seamless login-to-signup redirection.
 
+> **🤖 AI-Assisted Development**: Some features in this project (such as email verification and account deletion) were implemented with assistance from AI coding agents (Claude Code). These contributions are marked with 🤖 in the [CHANGELOG.md](./CHANGELOG.md).
+
 ## Architecture at a Glance
 
 ```
@@ -38,8 +40,10 @@ A cloud-native, AI-powered multi-tenant product tracker that scrapes e‑commerc
 ### Authentication & Multi-Tenancy
 
 - **Secure user accounts** – Email/password registration with JWT token authentication (30-day expiration).
+- **Email verification** 🤖 – Two-step OTP-based registration with email verification required before login (Resend integration).
 - **Protected routes** – All application features require authentication; automatic redirection to login.
 - **Smart login flow** – If an email isn't found during login, automatically redirects to signup with email pre-filled.
+- **Account deletion** 🤖 – Two-step email verification with comprehensive warnings before permanent data deletion.
 - **Complete data isolation** – Each user can only access their own tracked products and provider configurations.
 - **Password security** – Bcrypt hashing with minimum 8-character requirement.
 
@@ -94,6 +98,8 @@ Required variables:
 - `DB_USER` and `DB_PASSWORD` – PostgreSQL credentials
 - `GOOGLE_API_KEY` – Google Gemini API key for AI agent
 - `JWT_SECRET_KEY` – Generate with: `python -c "import secrets; print(secrets.token_urlsafe(32))"`
+- `RESEND_API_KEY` 🤖 – Resend API key for email verification ([Get one here](https://resend.com/api-keys))
+- `RESEND_FROM_EMAIL` 🤖 – Verified sender email (e.g., `mantis-verify@yourdomain.com`)
 - `CLOUDFLARE_TUNNEL_TOKEN` – (Optional) For HTTPS access via Cloudflare
 
 ### 2. Deploy with Docker Compose
@@ -206,23 +212,29 @@ Once deployed, interactive API docs available at:
 
 Key endpoints:
 
-- `POST /auth/register` – Create new user account
+- `POST /auth/signup-initiate` 🤖 – Initiate registration with email OTP
+- `POST /auth/verify-otp` 🤖 – Verify OTP and create account
+- `POST /auth/register` – Create new user account (deprecated)
 - `POST /auth/login` – Authenticate and get JWT token
 - `GET /auth/me` – Get current user info (requires auth)
+- `POST /auth/delete-initiate` 🤖 – Initiate account deletion with email OTP (requires auth)
+- `DELETE /auth/delete-confirm` 🤖 – Verify OTP and permanently delete account (requires auth)
 - `GET /products` – List user's tracked products (requires auth)
 - `POST /products` – Add new product to track (requires auth)
 - `GET /providers/config` – Get user's provider configurations (requires auth)
 
 ## Roadmap Ideas
 
-- Email verification with Resend integration
-- Password reset functionality
-- User profile management (change password, update email)
-- Historical charts and CSV export
-- Watchlists and price alert notifications
+- ~~Email verification with Resend integration~~ ✅ (Completed - v1.1.0)
+- ~~User account deletion~~ ✅ (Completed - v1.1.0)
+- Password reset functionality with email OTP
+- User profile management (change password, update email, avatar upload)
+- Historical price charts and CSV export
+- Watchlists and price alert notifications via email
 - Admin dashboard for user management
 - Rate limiting and API throttling
 - CI/CD pipeline with automated testing and deployment
+- Two-factor authentication (2FA) for enhanced security
 
 ## Changelog
 
