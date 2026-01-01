@@ -27,9 +27,23 @@ export interface RegisterData {
   name?: string
 }
 
+export interface OTPResponse {
+  message: string
+  email: string
+}
+
+export interface VerifyOTPData {
+  email: string
+  otp: string
+}
+
 export interface TokenResponse {
   access_token: string
   token_type: string
+}
+
+export interface DeleteAccountResponse {
+  message: string
 }
 
 /**
@@ -83,7 +97,52 @@ export function getAuthHeaders(): HeadersInit {
 }
 
 /**
- * Register a new user account
+ * Initiate signup by sending OTP to email (Step 1 of 2)
+ */
+export async function signupInitiate(data: RegisterData): Promise<OTPResponse> {
+  const baseUrl = await resolveBackendBaseUrl()
+  const response = await fetch(`${baseUrl}/auth/signup-initiate`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(data),
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.detail || "Failed to send OTP")
+  }
+
+  return response.json()
+}
+
+/**
+ * Verify OTP and complete registration (Step 2 of 2)
+ */
+export async function verifyOTP(data: VerifyOTPData): Promise<TokenResponse> {
+  const baseUrl = await resolveBackendBaseUrl()
+  const response = await fetch(`${baseUrl}/auth/verify-otp`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(data),
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.detail || "Invalid or expired OTP")
+  }
+
+  const tokenData: TokenResponse = await response.json()
+  setToken(tokenData.access_token)
+  return tokenData
+}
+
+/**
+ * Register a new user account (DEPRECATED - use signupInitiate + verifyOTP instead)
+ * @deprecated Use the two-step OTP flow instead
  */
 export async function register(data: RegisterData): Promise<TokenResponse> {
   const baseUrl = await resolveBackendBaseUrl()
@@ -169,6 +228,52 @@ export async function getCurrentUser(): Promise<User> {
     }
     throw new Error("Failed to get user information")
   }
+
+  return response.json()
+}
+
+/**
+ * Initiate account deletion by sending OTP to email (Step 1 of 2)
+ */
+export async function deleteAccountInitiate(): Promise<OTPResponse> {
+  const baseUrl = await resolveBackendBaseUrl()
+  const response = await fetch(`${baseUrl}/auth/delete-initiate`, {
+    method: "POST",
+    headers: {
+      ...getAuthHeaders(),
+    },
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.detail || "Failed to send deletion OTP")
+  }
+
+  return response.json()
+}
+
+/**
+ * Verify OTP and permanently delete account (Step 2 of 2)
+ * ⚠️ WARNING: This action cannot be undone!
+ */
+export async function deleteAccountConfirm(otp: string): Promise<DeleteAccountResponse> {
+  const baseUrl = await resolveBackendBaseUrl()
+  const response = await fetch(`${baseUrl}/auth/delete-confirm`, {
+    method: "DELETE",
+    headers: {
+      ...getAuthHeaders(),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ otp }),
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.detail || "Failed to delete account")
+  }
+
+  // Remove token after successful deletion
+  removeToken()
 
   return response.json()
 }

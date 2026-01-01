@@ -18,6 +18,7 @@ class User(Base):
     hashed_password = Column(String(255), nullable=False)
     name = Column(String(255), nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)
+    is_verified = Column(Boolean, default=True, nullable=False)  # True by default (verified before creation)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     last_login = Column(DateTime(timezone=True), nullable=True)
 

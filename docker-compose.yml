@@ -20,7 +20,21 @@ services:
       timeout: 5s
       retries: 5
 
-  # 2. Backend Service (FastAPI)
+  # 2. Redis Service (for OTP temporary storage)
+  redis:
+    image: redis:7-alpine
+    container_name: mantis-redis
+    restart: always
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    networks:
+      - mantis-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # 3. Backend Service (FastAPI)
   backend:
     build:
       context: ./backend
@@ -30,9 +44,13 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
       # Internal Docker DNS allows "db" hostname
       DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@db:5432/mantis_production
+      # Redis connection
+      REDIS_URL: redis://redis:6379/0
       # Google API Key (existing functionality)
       GOOGLE_API_KEY: ${GOOGLE_API_KEY}
       GEMINI_MODEL_NAME: ${GEMINI_MODEL_NAME:-gemini-2.0-flash-exp}
@@ -42,12 +60,17 @@ services:
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
       JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
       JWT_EXPIRATION_MINUTES: ${JWT_EXPIRATION_MINUTES:-43200}
+      # Email service (Resend)
+      RESEND_API_KEY: ${RESEND_API_KEY}
+      RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-noreply@mantis.com}
+      # OTP Configuration
+      OTP_EXPIRATION_MINUTES: ${OTP_EXPIRATION_MINUTES:-10}
     networks:
       - mantis-network
     ports:
       - "8001:8000"  # Expose for local testing (remove in production)
 
-  # 3. Frontend Service (Next.js)
+  # 4. Frontend Service (Next.js)
   frontend:
     build:
       context: ./mantis
@@ -67,7 +90,7 @@ services:
     ports:
       - "3000:3000"
 
-  # 4. Access Tunnel (Cloudflare) - Optional for local testing
+  # 5. Access Tunnel (Cloudflare) - Optional for local testing
   tunnel:
     image: cloudflare/cloudflared:latest
     container_name: mantis-tunnel
