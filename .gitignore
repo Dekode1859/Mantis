@@ -4,8 +4,12 @@ notebooks/
 
 # Docker
 .env
+.env.dev
+.env.prod
 postgres_data/
 .dockerignore
+deployments/*/postgres_data/
+deployments/*
 
 # Python
 __pycache__/

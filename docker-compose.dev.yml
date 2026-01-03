@@ -1,0 +1,95 @@
+version: '3.8'
+
+services:
+  # 1. Database Service (PostgreSQL 15) - DEVELOPMENT
+  db:
+    image: postgres:15-alpine
+    container_name: mantis-dev-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: mantis_dev
+    volumes:
+      - ./deployments/dev/postgres_data:/var/lib/postgresql/data
+    networks:
+      - mantis-dev-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d mantis_dev"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 2. Redis Service (for OTP temporary storage) - DEVELOPMENT
+  redis:
+    image: redis:7-alpine
+    container_name: mantis-dev-redis
+    restart: unless-stopped
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    networks:
+      - mantis-dev-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # 3. Backend Service (FastAPI) - DEVELOPMENT
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: mantis-dev-backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      # Database connection
+      DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@db:5432/mantis_dev
+      # Redis connection
+      REDIS_URL: redis://redis:6379/0
+      # AI Provider (Optional - Configure in Settings UI)
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      GEMINI_MODEL_NAME: ${GEMINI_MODEL_NAME:-gemini-2.0-flash-exp}
+      # CORS configuration for local development
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS}
+      # JWT Authentication
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      JWT_EXPIRATION_MINUTES: ${JWT_EXPIRATION_MINUTES:-43200}
+      # Email service (Resend)
+      RESEND_API_KEY: ${RESEND_API_KEY}
+      RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-mantis-verify@dekode.live}
+      # OTP Configuration
+      OTP_EXPIRATION_MINUTES: ${OTP_EXPIRATION_MINUTES:-10}
+    networks:
+      - mantis-dev-network
+    ports:
+      - "8002:8000"  # Dev backend on port 8002
+
+  # 4. Frontend Service (Next.js) - DEVELOPMENT
+  frontend:
+    build:
+      context: ./mantis
+      dockerfile: Dockerfile
+      args:
+        # Use /api prefix for backend routes
+        NEXT_PUBLIC_API_BASE_URL: /api
+    container_name: mantis-dev-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      # Internal backend URL for server-side proxy
+      BACKEND_URL: http://backend:8000
+    networks:
+      - mantis-dev-network
+    ports:
+      - "3001:3000"  # Dev frontend on port 3001
+
+networks:
+  mantis-dev-network:
+    driver: bridge
