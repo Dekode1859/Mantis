@@ -1,0 +1,106 @@
+version: '3.8'
+
+services:
+  # 1. Database Service (PostgreSQL 15) - PRODUCTION
+  db:
+    image: postgres:15-alpine
+    container_name: mantis-prod-db
+    restart: always
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: mantis_production
+    volumes:
+      - ./deployments/prod/postgres_data:/var/lib/postgresql/data
+    networks:
+      - mantis-prod-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d mantis_production"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 2. Redis Service (for OTP temporary storage) - PRODUCTION
+  redis:
+    image: redis:7-alpine
+    container_name: mantis-prod-redis
+    restart: always
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    networks:
+      - mantis-prod-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # 3. Backend Service (FastAPI) - PRODUCTION
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: mantis-prod-backend
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      # Database connection
+      DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@db:5432/mantis_production
+      # Redis connection
+      REDIS_URL: redis://redis:6379/0
+      # AI Provider (Optional - Configure in Settings UI)
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      GEMINI_MODEL_NAME: ${GEMINI_MODEL_NAME:-gemini-2.0-flash-exp}
+      # CORS configuration for production HTTPS
+      CORS_ALLOW_ORIGIN_REGEX: ${CORS_ALLOW_ORIGIN_REGEX:-https://.*}
+      # JWT Authentication
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      JWT_EXPIRATION_MINUTES: ${JWT_EXPIRATION_MINUTES:-43200}
+      # Email service (Resend)
+      RESEND_API_KEY: ${RESEND_API_KEY}
+      RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-mantis-verify@dekode.live}
+      # OTP Configuration
+      OTP_EXPIRATION_MINUTES: ${OTP_EXPIRATION_MINUTES:-10}
+    networks:
+      - mantis-prod-network
+    ports:
+      - "8001:8000"  # Prod backend on port 8001
+
+  # 4. Frontend Service (Next.js) - PRODUCTION
+  frontend:
+    build:
+      context: ./mantis
+      dockerfile: Dockerfile
+      args:
+        # Use /api prefix for backend routes
+        NEXT_PUBLIC_API_BASE_URL: /api
+    container_name: mantis-prod-frontend
+    restart: always
+    depends_on:
+      - backend
+    environment:
+      # Internal backend URL for server-side proxy
+      BACKEND_URL: http://backend:8000
+    networks:
+      - mantis-prod-network
+    ports:
+      - "3000:3000"  # Prod frontend on port 3000
+
+  # 5. Cloudflare Tunnel - PRODUCTION ONLY
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: mantis-prod-tunnel
+    restart: always
+    command: tunnel run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN}
+    networks:
+      - mantis-prod-network
+
+networks:
+  mantis-prod-network:
+    driver: bridge
