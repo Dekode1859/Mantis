@@ -46,15 +46,28 @@ def _clean_html(page_content: str) -> str:
     return cleaned
 
 
-async def extract_product_data(page_content: str) -> ProductExtractionSchema:
-    """Extract product data using the configured provider."""
+async def extract_product_data(page_content: str, user_id: int | None = None) -> ProductExtractionSchema:
+    """Extract product data using the configured provider.
+
+    Args:
+        page_content: The HTML content to extract product data from
+        user_id: The ID of the user making the request. If provided, uses their provider config.
+    """
     cleaned = _clean_html(page_content)
     logger.info("Cleaned HTML to %s characters", len(cleaned))
 
     # Load active provider configuration from database
     db = SessionLocal()
     try:
-        config = db.query(ProviderConfig).filter(ProviderConfig.is_active == True).first()
+        # If user_id is provided, get that user's active provider config
+        if user_id is not None:
+            config = db.query(ProviderConfig).filter(
+                ProviderConfig.user_id == user_id,
+                ProviderConfig.is_active == True
+            ).first()
+        else:
+            # Legacy fallback: get any active provider (for CLI tools, etc.)
+            config = db.query(ProviderConfig).filter(ProviderConfig.is_active == True).first()
 
         if not config:
             # Fallback to Google Gemini if no provider configured
