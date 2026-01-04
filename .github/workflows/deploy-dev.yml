@@ -1,0 +1,38 @@
+name: Deploy to Development
+
+on:
+  push:
+    branches: [develop]
+
+jobs:
+  deploy-dev:
+    runs-on: self-hosted
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Stop existing dev containers
+        run: |
+          docker-compose -f docker-compose.dev.yml down || true
+
+      - name: Build and start dev environment
+        run: |
+          docker-compose -f docker-compose.dev.yml up -d --build
+
+      - name: Wait for services to start
+        run: sleep 10
+
+      - name: Health check backend
+        run: |
+          curl -f http://localhost:8002/health || exit 1
+
+      - name: Verify database connectivity
+        run: |
+          docker exec mantis-dev-db psql -U mantis_user -d mantis_dev -c "SELECT 1" || exit 1
+
+      - name: Deployment summary
+        run: |
+          echo "✅ Dev deployment successful"
+          echo "🌐 Frontend: http://192.168.1.51:3001"
+          echo "🔧 Backend: http://192.168.1.51:8002"
+          echo "📊 Commit: ${{ github.sha }}"
