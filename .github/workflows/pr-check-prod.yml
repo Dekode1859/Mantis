@@ -8,6 +8,17 @@ jobs:
   pre-deployment-checks:
     runs-on: self-hosted
     steps:
+      - name: Enforce source branch is develop
+        run: |
+          SOURCE_BRANCH="${{ github.head_ref }}"
+          if [ "$SOURCE_BRANCH" != "develop" ]; then
+            echo "❌ ERROR: Pull requests to master must come from 'develop' branch only!"
+            echo "   Current source branch: $SOURCE_BRANCH"
+            echo "   Please merge your changes to 'develop' first, then create a PR from develop to master."
+            exit 1
+          fi
+          echo "✅ Source branch validation passed: $SOURCE_BRANCH → master"
+
       - name: Checkout code
         uses: actions/checkout@v4
 
@@ -22,11 +33,11 @@ jobs:
 
       - name: Validate docker-compose syntax
         run: |
-          docker-compose -f docker-compose.prod.yml config
+          docker compose -f docker-compose.prod.yml config
 
       - name: Build test containers
         run: |
-          docker-compose -f docker-compose.prod.yml build
+          docker compose -f docker-compose.prod.yml build
 
       - name: Check disk space
         run: |

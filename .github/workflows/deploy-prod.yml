@@ -18,12 +18,12 @@ jobs:
 
       - name: Build new production containers
         run: |
-          docker-compose -f docker-compose.prod.yml build
+          docker compose -f docker-compose.prod.yml build
 
       - name: Deploy with zero downtime
         run: |
           # Start new containers (will replace old ones)
-          docker-compose -f docker-compose.prod.yml up -d
+          docker compose -f docker-compose.prod.yml up -d
 
       - name: Wait for services to initialize
         run: sleep 15
