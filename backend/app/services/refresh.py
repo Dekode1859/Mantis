@@ -20,7 +20,7 @@ async def _refresh_product(db: Session, product: Product) -> None:
     url = product.url
     logger.info("Refreshing product %s (id=%s)", url, product.id)
     page_content = await fetch_page_content(url)
-    structured = await extract_product_data(page_content)
+    structured = await extract_product_data(page_content, user_id=product.user_id)
     now = now_local()
 
     product.title = structured.title

@@ -79,7 +79,7 @@ async def fetch_product_page(
     except Exception as exc:  # noqa: BLE001 - surfacing external failure details
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
-        structured = await extract_product_data(page_content)
+        structured = await extract_product_data(page_content, user_id=current_user.id)
     except Exception as exc:  # noqa: BLE001 - propagate agent errors
         raise HTTPException(status_code=502, detail=f"Extraction failed: {exc}") from exc
     now = now_local()
