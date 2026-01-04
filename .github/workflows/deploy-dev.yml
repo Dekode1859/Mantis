@@ -7,9 +7,34 @@ on:
 jobs:
   deploy-dev:
     runs-on: self-hosted
+    environment: development
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Create .env.dev from GitHub secrets
+        run: |
+          cat > .env.dev << EOF
+          # Database Configuration
+          DB_USER=${{ secrets.DB_USER }}
+          DB_PASSWORD=${{ secrets.DB_PASSWORD }}
+
+          # JWT Authentication Configuration
+          JWT_SECRET_KEY=${{ secrets.JWT_SECRET_KEY }}
+          JWT_ALGORITHM=${{ secrets.JWT_ALGORITHM }}
+          JWT_EXPIRATION_MINUTES=${{ secrets.JWT_EXPIRATION_MINUTES }}
+
+          # CORS Configuration
+          CORS_ALLOW_ORIGINS=${{ secrets.CORS_ALLOW_ORIGINS }}
+
+          # Email Verification (Resend)
+          RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}
+          RESEND_FROM_EMAIL=${{ secrets.RESEND_FROM_EMAIL }}
+
+          # OTP Configuration
+          OTP_EXPIRATION_MINUTES=${{ secrets.OTP_EXPIRATION_MINUTES }}
+          EOF
 
       - name: Stop existing dev containers
         run: |
@@ -36,3 +61,8 @@ jobs:
           echo "🌐 Frontend: http://192.168.1.25:3001"
           echo "🔧 Backend: http://192.168.1.25:8002"
           echo "📊 Commit: ${{ github.sha }}"
+
+      - name: Cleanup secrets
+        if: always()
+        run: |
+          rm -f .env.dev

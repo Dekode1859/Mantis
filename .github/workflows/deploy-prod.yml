@@ -7,9 +7,37 @@ on:
 jobs:
   deploy-production:
     runs-on: self-hosted
+    environment: production
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Create .env.prod from GitHub secrets
+        run: |
+          cat > .env.prod << EOF
+          # Database Configuration
+          DB_USER=${{ secrets.DB_USER }}
+          DB_PASSWORD=${{ secrets.DB_PASSWORD }}
+
+          # JWT Authentication Configuration
+          JWT_SECRET_KEY=${{ secrets.JWT_SECRET_KEY }}
+          JWT_ALGORITHM=${{ secrets.JWT_ALGORITHM }}
+          JWT_EXPIRATION_MINUTES=${{ secrets.JWT_EXPIRATION_MINUTES }}
+
+          # CORS Configuration
+          CORS_ALLOW_ORIGIN_REGEX=${{ secrets.CORS_ALLOW_ORIGIN_REGEX }}
+
+          # Email Verification (Resend)
+          RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}
+          RESEND_FROM_EMAIL=${{ secrets.RESEND_FROM_EMAIL }}
+
+          # OTP Configuration
+          OTP_EXPIRATION_MINUTES=${{ secrets.OTP_EXPIRATION_MINUTES }}
+
+          # Cloudflare Tunnel Token
+          CLOUDFLARE_TUNNEL_TOKEN=${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
+          EOF
 
       - name: Create pre-deployment backup
         run: |
@@ -52,3 +80,8 @@ jobs:
           echo ""
           echo "📦 Running containers:"
           docker ps --filter "name=mantis-prod-" --format "table {{.Names}}\t{{.Status}}"
+
+      - name: Cleanup secrets
+        if: always()
+        run: |
+          rm -f .env.prod
