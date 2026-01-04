@@ -1,0 +1,95 @@
+name: Production PR Checks
+
+on:
+  pull_request:
+    branches: [master]
+
+jobs:
+  pre-deployment-checks:
+    runs-on: self-hosted
+    environment: production
+
+    steps:
+      - name: Enforce source branch is develop
+        run: |
+          SOURCE_BRANCH="${{ github.head_ref }}"
+          if [ "$SOURCE_BRANCH" != "develop" ]; then
+            echo "❌ ERROR: Pull requests to master must come from 'develop' branch only!"
+            echo "   Current source branch: $SOURCE_BRANCH"
+            echo "   Please merge your changes to 'develop' first, then create a PR from develop to master."
+            exit 1
+          fi
+          echo "✅ Source branch validation passed: $SOURCE_BRANCH → master"
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create .env.prod from GitHub secrets
+        run: |
+          cat > .env.prod << EOF
+          # Database Configuration
+          DB_USER=${{ secrets.DB_USER }}
+          DB_PASSWORD=${{ secrets.DB_PASSWORD }}
+
+          # JWT Authentication Configuration
+          JWT_SECRET_KEY=${{ secrets.JWT_SECRET_KEY }}
+          JWT_ALGORITHM=${{ secrets.JWT_ALGORITHM }}
+          JWT_EXPIRATION_MINUTES=${{ secrets.JWT_EXPIRATION_MINUTES }}
+
+          # CORS Configuration
+          CORS_ALLOW_ORIGIN_REGEX=${{ secrets.CORS_ALLOW_ORIGIN_REGEX }}
+
+          # Email Verification (Resend)
+          RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}
+          RESEND_FROM_EMAIL=${{ secrets.RESEND_FROM_EMAIL }}
+
+          # OTP Configuration
+          OTP_EXPIRATION_MINUTES=${{ secrets.OTP_EXPIRATION_MINUTES }}
+
+          # Cloudflare Tunnel Token
+          CLOUDFLARE_TUNNEL_TOKEN=${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
+          EOF
+
+      - name: Check prod environment status
+        run: |
+          docker ps | grep mantis-prod-backend || echo "⚠️ Prod not running (first deploy?)"
+
+      - name: Verify backup system ready
+        run: |
+          test -d deployments/prod/backups || mkdir -p deployments/prod/backups
+          test -f scripts/backup-prod.sh || exit 1
+
+      - name: Validate docker-compose syntax
+        run: |
+          docker compose -f docker-compose.prod.yml config
+
+      - name: Build test containers
+        run: |
+          docker compose -f docker-compose.prod.yml build
+
+      - name: Check disk space
+        run: |
+          df -h | grep -E 'Filesystem|/$'
+          SPACE=$(df / | tail -1 | awk '{print $5}' | sed 's/%//')
+          if [ $SPACE -gt 80 ]; then
+            echo "⚠️ Warning: Disk usage above 80%"
+            exit 1
+          fi
+
+      - name: Verify environment variables
+        run: |
+          test -f .env.prod || exit 1
+          grep -q "CLOUDFLARE_TUNNEL_TOKEN" .env.prod || echo "⚠️ Tunnel token missing"
+
+      - name: Verify database exists
+        run: |
+          docker exec mantis-prod-db psql -U mantis_user -d mantis_production -c "\dt" || echo "⚠️ First deployment - tables will be created"
+
+      - name: Check backend health
+        run: |
+          curl -f http://localhost:8001/health || echo "⚠️ Backend not responding (will restart on deploy)"
+
+      - name: Cleanup secrets
+        if: always()
+        run: |
+          rm -f .env.prod

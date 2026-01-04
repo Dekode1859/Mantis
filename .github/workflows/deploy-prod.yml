@@ -1,0 +1,87 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [master]
+
+jobs:
+  deploy-production:
+    runs-on: self-hosted
+    environment: production
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create .env.prod from GitHub secrets
+        run: |
+          cat > .env.prod << EOF
+          # Database Configuration
+          DB_USER=${{ secrets.DB_USER }}
+          DB_PASSWORD=${{ secrets.DB_PASSWORD }}
+
+          # JWT Authentication Configuration
+          JWT_SECRET_KEY=${{ secrets.JWT_SECRET_KEY }}
+          JWT_ALGORITHM=${{ secrets.JWT_ALGORITHM }}
+          JWT_EXPIRATION_MINUTES=${{ secrets.JWT_EXPIRATION_MINUTES }}
+
+          # CORS Configuration
+          CORS_ALLOW_ORIGIN_REGEX=${{ secrets.CORS_ALLOW_ORIGIN_REGEX }}
+
+          # Email Verification (Resend)
+          RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}
+          RESEND_FROM_EMAIL=${{ secrets.RESEND_FROM_EMAIL }}
+
+          # OTP Configuration
+          OTP_EXPIRATION_MINUTES=${{ secrets.OTP_EXPIRATION_MINUTES }}
+
+          # Cloudflare Tunnel Token
+          CLOUDFLARE_TUNNEL_TOKEN=${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
+          EOF
+
+      - name: Create pre-deployment backup
+        run: |
+          ./scripts/backup-prod.sh
+          echo "✅ Pre-deployment backup created"
+
+      - name: Build new production containers
+        run: |
+          docker compose -f docker-compose.prod.yml build
+
+      - name: Deploy with zero downtime
+        run: |
+          # Start new containers (will replace old ones)
+          docker compose -f docker-compose.prod.yml up -d
+
+      - name: Wait for services to initialize
+        run: sleep 15
+
+      - name: Verify backend health
+        run: |
+          curl -f http://localhost:8001/health || exit 1
+
+      - name: Verify database connectivity
+        run: |
+          docker exec mantis-prod-db psql -U mantis_user -d mantis_production -c "\dt"
+
+      - name: Verify tunnel is running
+        run: |
+          docker ps | grep mantis-prod-tunnel || exit 1
+
+      - name: Cleanup old Docker images
+        run: |
+          docker image prune -f
+
+      - name: Deployment summary
+        run: |
+          echo "🚀 Production deployment successful"
+          echo "🌐 Live at: https://mantis.dekode.live"
+          echo "📊 Commit: ${{ github.sha }}"
+          echo ""
+          echo "📦 Running containers:"
+          docker ps --filter "name=mantis-prod-" --format "table {{.Names}}\t{{.Status}}"
+
+      - name: Cleanup secrets
+        if: always()
+        run: |
+          rm -f .env.prod
