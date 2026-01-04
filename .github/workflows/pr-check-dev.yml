@@ -1,0 +1,36 @@
+name: Dev PR Checks
+
+on:
+  pull_request:
+    branches: [develop]
+
+jobs:
+  validate:
+    runs-on: self-hosted
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate docker-compose syntax
+        run: |
+          docker-compose -f docker-compose.dev.yml config
+
+      - name: Build test (no deployment)
+        run: |
+          docker-compose -f docker-compose.dev.yml build
+
+      - name: Check .env.dev exists
+        run: |
+          test -f .env.dev || exit 1
+
+      - name: Verify backend Dockerfile
+        run: |
+          test -f backend/Dockerfile || exit 1
+
+      - name: Verify frontend Dockerfile
+        run: |
+          test -f mantis/Dockerfile || exit 1
+
+      - name: Check disk space
+        run: |
+          df -h | grep -E 'Filesystem|/$'
