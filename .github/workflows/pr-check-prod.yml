@@ -61,11 +61,11 @@ jobs:
 
       - name: Validate docker-compose syntax
         run: |
-          docker compose -f docker-compose.prod.yml config
+          docker compose -f docker-compose.prod.yml --env-file .env.prod config
 
       - name: Build test containers
         run: |
-          docker compose -f docker-compose.prod.yml build
+          docker compose -f docker-compose.prod.yml --env-file .env.prod build
 
       - name: Check disk space
         run: |

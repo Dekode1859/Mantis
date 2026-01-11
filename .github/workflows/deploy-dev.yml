@@ -38,11 +38,11 @@ jobs:
 
       - name: Stop existing dev containers
         run: |
-          docker compose -f docker-compose.dev.yml down || true
+          docker compose -f docker-compose.dev.yml --env-file .env.dev down --remove-orphans || true
 
       - name: Build and start dev environment
         run: |
-          docker compose -f docker-compose.dev.yml up -d --build
+          docker compose -f docker-compose.dev.yml --env-file .env.dev up -d --build
 
       - name: Wait for services to start
         run: sleep 10
