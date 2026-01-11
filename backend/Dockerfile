@@ -25,5 +25,7 @@ COPY . .
 # Expose port 8000
 EXPOSE 8000
 
-# Run uvicorn server
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Run uvicorn server with multiple workers for production
+# Workers: 2 * CPU cores + 1 (let's use 4 workers as a good default)
+# This allows handling concurrent requests and provides redundancy
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]

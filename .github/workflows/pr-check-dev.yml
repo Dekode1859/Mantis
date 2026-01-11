@@ -38,11 +38,11 @@ jobs:
 
       - name: Validate docker-compose syntax
         run: |
-          docker compose -f docker-compose.dev.yml config
+          docker compose -f docker-compose.dev.yml --env-file .env.dev config
 
       - name: Build test (no deployment)
         run: |
-          docker compose -f docker-compose.dev.yml build
+          docker compose -f docker-compose.dev.yml --env-file .env.dev build
 
       - name: Check .env.dev exists
         run: |

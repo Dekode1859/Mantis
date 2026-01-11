@@ -44,14 +44,18 @@ jobs:
           ./scripts/backup-prod.sh
           echo "✅ Pre-deployment backup created"
 
+      - name: Stop existing prod containers (to avoid conflicts)
+        run: |
+          docker compose -f docker-compose.prod.yml --env-file .env.prod down --remove-orphans || true
+
       - name: Build new production containers
         run: |
-          docker compose -f docker-compose.prod.yml build
+          docker compose -f docker-compose.prod.yml --env-file .env.prod build
 
       - name: Deploy with zero downtime
         run: |
           # Start new containers (will replace old ones)
-          docker compose -f docker-compose.prod.yml up -d
+          docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
 
       - name: Wait for services to initialize
         run: sleep 15
