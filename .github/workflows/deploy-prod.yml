@@ -46,7 +46,13 @@ jobs:
 
       - name: Stop existing prod containers (to avoid conflicts)
         run: |
+          # First try docker compose down
           docker compose -f docker-compose.prod.yml --env-file .env.prod down --remove-orphans || true
+
+          # Force remove any lingering mantis-prod containers (especially tunnel)
+          docker ps -a --filter "name=mantis-prod-" --format "{{.Names}}" | xargs -r docker rm -f || true
+
+          echo "✅ All existing prod containers removed"
 
       - name: Build new production containers
         run: |

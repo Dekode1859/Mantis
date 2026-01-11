@@ -38,7 +38,13 @@ jobs:
 
       - name: Stop existing dev containers
         run: |
+          # First try docker compose down
           docker compose -f docker-compose.dev.yml --env-file .env.dev down --remove-orphans || true
+
+          # Force remove any lingering mantis-dev containers
+          docker ps -a --filter "name=mantis-dev-" --format "{{.Names}}" | xargs -r docker rm -f || true
+
+          echo "✅ All existing dev containers removed"
 
       - name: Build and start dev environment
         run: |
