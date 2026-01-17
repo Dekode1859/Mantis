@@ -17,11 +17,12 @@ jobs:
 
       - name: Copy code to /root/Mantis
         run: |
+          # Create /root/Mantis if it doesn't exist
+          mkdir -p /root/Mantis
+
           # Sync code from runner workspace to /root/Mantis
-          rsync -av --delete \
-            --exclude='deployments/' \
-            --exclude='.git/' \
-            mantis-repo/ /root/Mantis/
+          cd mantis-repo
+          find . -mindepth 1 -maxdepth 1 ! -name 'deployments' ! -name '.git' -exec cp -rf {} /root/Mantis/ \;
 
           echo "✅ Code synced to /root/Mantis"
 
