@@ -17,10 +17,13 @@ jobs:
 
       - name: Copy code to /root/Mantis
         run: |
-          rsync -av --delete \
-            --exclude='deployments/' \
-            --exclude='.git/' \
-            mantis-repo/ /root/Mantis/
+          # Create /root/Mantis if it doesn't exist
+          mkdir -p /root/Mantis
+
+          # Copy all files except deployments and .git
+          cd mantis-repo
+          find . -mindepth 1 -maxdepth 1 ! -name 'deployments' ! -name '.git' -exec cp -rf {} /root/Mantis/ \;
+
           echo "✅ Code synced to /root/Mantis"
 
       - name: Create .env.dev from GitHub secrets
