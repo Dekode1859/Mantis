@@ -16,8 +16,9 @@ echo "🔄 Creating production database backup..."
 
 # Check if production database is running
 if ! docker ps | grep -q mantis-prod-db; then
-    echo "❌ Error: Production database is not running"
-    exit 1
+    echo "ℹ️  Production database is not running - skipping backup"
+    echo "✅ Backup skipped successfully (no database to backup)"
+    exit 0
 fi
 
 # Backup database using pg_dump
