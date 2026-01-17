@@ -12,10 +12,22 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          path: mantis-repo
+
+      - name: Copy code to /root/Mantis
+        run: |
+          # Sync code from runner workspace to /root/Mantis
+          rsync -av --delete \
+            --exclude='deployments/' \
+            --exclude='.git/' \
+            mantis-repo/ /root/Mantis/
+
+          echo "✅ Code synced to /root/Mantis"
 
       - name: Create .env.prod from GitHub secrets
         run: |
-          cat > .env.prod << EOF
+          cat > /root/Mantis/.env.prod << EOF
           # Database Configuration
           DB_USER=${{ secrets.DB_USER }}
           DB_PASSWORD=${{ secrets.DB_PASSWORD }}
@@ -41,11 +53,14 @@ jobs:
 
       - name: Create pre-deployment backup
         run: |
+          cd /root/Mantis
           ./scripts/backup-prod.sh
           echo "✅ Pre-deployment backup created"
 
       - name: Stop existing prod containers (to avoid conflicts)
         run: |
+          cd /root/Mantis
+
           # First try docker compose down
           docker compose -f docker-compose.prod.yml --env-file .env.prod down --remove-orphans || true
 
@@ -56,10 +71,12 @@ jobs:
 
       - name: Build new production containers
         run: |
+          cd /root/Mantis
           docker compose -f docker-compose.prod.yml --env-file .env.prod build
 
       - name: Deploy with zero downtime
         run: |
+          cd /root/Mantis
           # Start new containers (will replace old ones)
           docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
 
@@ -94,4 +111,4 @@ jobs:
       - name: Cleanup secrets
         if: always()
         run: |
-          rm -f .env.prod
+          rm -f /root/Mantis/.env.prod
