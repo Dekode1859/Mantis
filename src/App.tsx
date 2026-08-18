@@ -1,7 +1,13 @@
 import { FormEvent, useEffect, useState } from "react";
 
 import { ProductCard } from "./components/ProductCard";
-import { addProduct, type ProductRecord } from "./domain/product";
+import {
+  addProduct,
+  ExtractionResultSchema,
+  markProductFailed,
+  markProductReady,
+  type ProductRecord,
+} from "./domain/product";
 import { loadProducts, saveProducts } from "./domain/product-store";
 
 function browserStorage(): Storage | undefined {
@@ -14,23 +20,57 @@ export default function App() {
   );
   const [url, setUrl] = useState("");
   const [feedback, setFeedback] = useState<string | undefined>();
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     saveProducts(browserStorage(), products);
   }, [products]);
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
+    let result;
     try {
-      const result = addProduct(products, url);
-      setProducts(result.products);
-      setUrl("");
-      setFeedback(
-        result.added ? "Product added and waiting for extraction." : "That product is already here.",
-      );
+      result = addProduct(products, url);
     } catch (error) {
-      setFeedback(error instanceof Error ? error.message : "The product link could not be added.");
+      setFeedback(error instanceof Error ? error.message : "Enter a valid product link.");
+      return;
+    }
+
+    if (!result.added) {
+      setFeedback("That product is already here.");
+      return;
+    }
+
+    setProducts(result.products);
+    setUrl("");
+    setIsSubmitting(true);
+    setFeedback("Product added. Extracting product details...");
+
+    try {
+      const response = await fetch("/api/extract", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: result.product.sourceUrl }),
+      });
+      const payload: unknown = await response.json();
+      if (!response.ok) {
+        const message =
+          typeof payload === "object" && payload !== null && "error" in payload
+            ? String(payload.error)
+            : "Extraction failed.";
+        throw new Error(message);
+      }
+
+      const extraction = ExtractionResultSchema.parse(payload);
+      setProducts((current) => markProductReady(current, result.product.id, extraction));
+      setFeedback("Product extracted and saved in this browser.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Extraction failed.";
+      setProducts((current) => markProductFailed(current, result.product.id, message));
+      setFeedback(`Extraction failed: ${message}`);
+    } finally {
+      setIsSubmitting(false);
     }
   }
 
@@ -48,7 +88,7 @@ export default function App() {
           <p className="eyebrow">Collection</p>
           <h1>Keep product links in one place.</h1>
           <p className="hero__copy">
-            Add a product URL now. Extraction will fill in the product details when that pipeline is connected.
+            Add a product URL now and the extractor will fill in the product details.
           </p>
         </div>
 
@@ -63,7 +103,9 @@ export default function App() {
               placeholder="https://www.amazon.in/dp/..."
               autoComplete="url"
             />
-            <button type="submit">Add product</button>
+            <button type="submit" disabled={isSubmitting}>
+              {isSubmitting ? "Extracting..." : "Add product"}
+            </button>
           </div>
           <p className="form-feedback" aria-live="polite">
             {feedback ?? "Use a complete HTTP or HTTPS URL."}

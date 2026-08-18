@@ -16,6 +16,25 @@ export function ProductCard({ product }: ProductCardProps) {
           <span className={`status status--${product.status}`}>{product.status}</span>
         </div>
         <h2>{product.title ?? "Product waiting for extraction"}</h2>
+        {product.status === "ready" && (
+          <dl className="product-card__details">
+            <div>
+              <dt>Price</dt>
+              <dd>{product.price ?? "Unavailable"}</dd>
+            </div>
+            <div>
+              <dt>Seller</dt>
+              <dd>{product.seller ?? "Unavailable"}</dd>
+            </div>
+            <div>
+              <dt>ASIN</dt>
+              <dd>{product.asin ?? "Unavailable"}</dd>
+            </div>
+          </dl>
+        )}
+        {product.status === "failed" && (
+          <p className="product-card__error">{product.extractionError ?? "Extraction failed."}</p>
+        )}
         <a href={product.sourceUrl} target="_blank" rel="noreferrer">
           {product.sourceUrl}
         </a>

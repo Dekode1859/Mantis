@@ -1,0 +1,17 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "mantis-scraper-preview",
+	"main": "src/entry.py",
+	"compatibility_date": "2026-08-18",
+	"compatibility_flags": [
+		"python_workers",
+		"global_fetch_strictly_public"
+	],
+	"vars": {
+		"OLLAMA_BASE_URL": "https://ollama.com/v1",
+		"OLLAMA_MODEL": "gpt-oss:120b"
+	},
+	"observability": {
+		"enabled": true
+	}
+}

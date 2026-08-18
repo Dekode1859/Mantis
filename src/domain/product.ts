@@ -8,10 +8,25 @@ export const ProductRecordSchema = z.object({
   site: z.string().min(1),
   status: ProductStatusSchema,
   title: z.string().min(1).nullable(),
+  price: z.string().min(1).nullable().default(null),
+  asin: z.string().min(1).nullable().default(null),
+  seller: z.string().min(1).nullable().default(null),
+  extractionError: z.string().min(1).nullable().default(null),
   addedAt: z.string().datetime(),
 });
 
 export type ProductRecord = z.infer<typeof ProductRecordSchema>;
+
+export const ExtractionResultSchema = z.object({
+  status: z.literal("ready"),
+  source_url: z.string().url(),
+  title: z.string().min(1),
+  price: z.string().min(1),
+  asin: z.string().min(1).nullable(),
+  seller: z.string().min(1).nullable(),
+});
+
+export type ExtractionResult = z.infer<typeof ExtractionResultSchema>;
 
 export function normalizeProductUrl(input: string): URL {
   const value = input.trim();
@@ -45,8 +60,44 @@ export function createQueuedProduct(input: string, addedAt = new Date()): Produc
     site: url.hostname.replace(/^www\./, ""),
     status: "queued",
     title: null,
+    price: null,
+    asin: null,
+    seller: null,
+    extractionError: null,
     addedAt: addedAt.toISOString(),
   });
+}
+
+export function markProductReady(
+  products: ProductRecord[],
+  productId: string,
+  result: ExtractionResult,
+): ProductRecord[] {
+  return products.map((product) =>
+    product.id === productId
+      ? ProductRecordSchema.parse({
+          ...product,
+          status: "ready",
+          title: result.title,
+          price: result.price,
+          asin: result.asin,
+          seller: result.seller,
+          extractionError: null,
+        })
+      : product,
+  );
+}
+
+export function markProductFailed(
+  products: ProductRecord[],
+  productId: string,
+  message: string,
+): ProductRecord[] {
+  return products.map((product) =>
+    product.id === productId
+      ? ProductRecordSchema.parse({ ...product, status: "failed", extractionError: message })
+      : product,
+  );
 }
 
 export function addProduct(

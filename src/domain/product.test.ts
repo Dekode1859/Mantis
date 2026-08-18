@@ -32,6 +32,10 @@ describe("product link flow", () => {
       site: "amazon.in",
       status: "queued",
       title: null,
+      price: null,
+      asin: null,
+      seller: null,
+      extractionError: null,
       addedAt: "2026-08-18T00:00:00.000Z",
     });
   });
