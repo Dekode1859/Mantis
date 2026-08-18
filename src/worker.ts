@@ -1,8 +1,18 @@
+import { ExtractionResultSchema, normalizeProductUrl } from "./domain/product";
+import {
+  failedProduct,
+  queuedProduct,
+  readyProduct,
+  upsertProduct,
+} from "./server/products";
+
 interface Env {
   ASSETS: Fetcher;
   SCRAPER: {
     extract_product(payload: { url: string }): Promise<unknown>;
   };
+  SUPABASE_URL?: string;
+  SUPABASE_SERVICE_ROLE_KEY?: string;
 }
 
 function isExtractRequest(value: unknown): value is { url: string } {
@@ -43,7 +53,21 @@ export default {
         if (!isExtractRequest(payload)) {
           return Response.json({ error: "A product URL is required" }, { status: 400 });
         }
-        return Response.json(await env.SCRAPER.extract_product(payload));
+
+        const sourceUrl = normalizeProductUrl(payload.url).toString();
+        await upsertProduct(env, queuedProduct(sourceUrl));
+
+        try {
+          const extraction = ExtractionResultSchema.parse(
+            await env.SCRAPER.extract_product({ url: sourceUrl }),
+          );
+          await upsertProduct(env, readyProduct(sourceUrl, extraction));
+          return Response.json(extraction);
+        } catch (error) {
+          const message = safeErrorMessage(error);
+          await upsertProduct(env, failedProduct(sourceUrl, message));
+          return Response.json({ error: message }, { status: 502 });
+        }
       } catch (error) {
         return Response.json({ error: safeErrorMessage(error) }, { status: 502 });
       }

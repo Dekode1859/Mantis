@@ -5,6 +5,8 @@ coverage/
 .env
 .env.*
 !.env.example
+.dev.vars*
+!.dev.vars.example
 .venv/
 data/runs/
 __pycache__/
