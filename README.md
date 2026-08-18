@@ -29,3 +29,29 @@ npm run deploy:dry-run
 ```
 
 This builds the UI and validates the Worker upload without changing the Cloudflare account.
+
+## Run the scraper slice
+
+The scraper uses Python 3.11 through UV. The LLM proposes CSS selectors only; Pydantic validates the proposal, and BeautifulSoup performs the extraction without another model call.
+
+```powershell
+cd D:\Mantis
+Copy-Item .env.example .env
+notepad .env
+uv sync
+uv run pytest
+```
+
+Set `OLLAMA_API_KEY` in `.env`. `OLLAMA_MODEL` defaults to `gpt-oss:120b`, and JSON mode is used for Ollama's structured response. Available models can be listed with:
+
+```powershell
+uv run python -m mantis_scraper models
+```
+
+Run discovery and extraction for one page:
+
+```powershell
+uv run python -m mantis_scraper discover --url "https://example.com/product"
+```
+
+Each run is saved under `data/runs/` with the fetched HTML, the bounded HTML sent to the model, the selector-only configuration, validation counts, and deterministic extracted values. The saved configuration contains selectors, not product values.

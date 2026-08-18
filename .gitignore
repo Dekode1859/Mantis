@@ -5,3 +5,7 @@ coverage/
 .env
 .env.*
 !.env.example
+.venv/
+data/runs/
+__pycache__/
+.pytest_cache/
