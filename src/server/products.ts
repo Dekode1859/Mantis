@@ -56,19 +56,15 @@ export async function upsertProduct(
   env: ProductPersistenceEnv,
   product: ProductWrite,
 ): Promise<boolean> {
-  if (!env.SUPABASE_URL && !env.SUPABASE_SERVICE_ROLE_KEY) {
-    return false;
-  }
-  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) {
-    throw new Error("Supabase persistence requires both server credentials");
-  }
+  const config = supabaseConfig(env);
+  if (!config) return false;
+  const endpoint = `${config.url}/rest/v1/products?on_conflict=source_url`;
 
-  const endpoint = `${env.SUPABASE_URL.replace(/\/$/, "")}/rest/v1/products?on_conflict=source_url`;
   const response = await fetch(endpoint, {
     method: "POST",
     headers: {
-      apikey: env.SUPABASE_SERVICE_ROLE_KEY,
-      Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
+      apikey: config.key,
+      Authorization: `Bearer ${config.key}`,
       "Content-Type": "application/json",
       Prefer: "resolution=merge-duplicates,return=minimal",
     },
@@ -83,6 +79,48 @@ export async function upsertProduct(
   }
 
   return true;
+}
+
+export async function deleteProduct(
+  env: ProductPersistenceEnv,
+  sourceUrl: string,
+): Promise<boolean> {
+  const config = supabaseConfig(env);
+  if (!config) return false;
+  const endpoint = `${config.url}/rest/v1/products?source_url=eq.${encodeURIComponent(sourceUrl)}`;
+
+  const response = await fetch(endpoint, {
+    method: "DELETE",
+    headers: {
+      apikey: config.key,
+      Authorization: `Bearer ${config.key}`,
+      Prefer: "return=minimal",
+    },
+  });
+
+  if (!response.ok) {
+    const message = responseMessage(await response.text());
+    throw new Error(
+      `Supabase product delete failed (${response.status})${message ? `: ${message}` : ""}`,
+    );
+  }
+
+  return true;
+}
+
+function supabaseConfig(
+  env: ProductPersistenceEnv,
+): { url: string; key: string } | undefined {
+  if (!env.SUPABASE_URL && !env.SUPABASE_SERVICE_ROLE_KEY) {
+    return undefined;
+  }
+  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) {
+    throw new Error("Supabase persistence requires both server credentials");
+  }
+  return {
+    url: env.SUPABASE_URL.replace(/\/$/, ""),
+    key: env.SUPABASE_SERVICE_ROLE_KEY,
+  };
 }
 
 export function queuedProduct(sourceUrl: string): ProductWrite {

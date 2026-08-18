@@ -272,6 +272,38 @@ button:hover {
   white-space: nowrap;
 }
 
+.product-card__actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.product-card__actions a {
+  min-width: 0;
+  flex: 1;
+}
+
+.product-card__delete {
+  padding: 6px 9px;
+  color: #ffb3a7;
+  border: 1px solid #75463f;
+  background: transparent;
+  font-size: 0.72rem;
+}
+
+.product-card__delete:hover {
+  color: #17100e;
+  background: #ff9d8d;
+}
+
+.product-card__delete:disabled {
+  color: #73796f;
+  border-color: #3a4037;
+  background: transparent;
+  cursor: not-allowed;
+}
+
 .product-card__meta {
   margin: auto 0 0;
   padding-top: 18px;

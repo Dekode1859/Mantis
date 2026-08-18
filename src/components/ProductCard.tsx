@@ -2,6 +2,8 @@ import type { ProductRecord } from "../domain/product";
 
 type ProductCardProps = {
   product: ProductRecord;
+  isDeleting: boolean;
+  onDelete: (product: ProductRecord) => void;
 };
 
 function formatPrice(product: ProductRecord): string {
@@ -19,7 +21,7 @@ function formatPrice(product: ProductRecord): string {
   }
 }
 
-export function ProductCard({ product }: ProductCardProps) {
+export function ProductCard({ product, isDeleting, onDelete }: ProductCardProps) {
   return (
     <article className="product-card">
       <div className="product-card__placeholder" aria-hidden="true">
@@ -42,9 +44,19 @@ export function ProductCard({ product }: ProductCardProps) {
         {product.status === "failed" && (
           <p className="product-card__error">{product.extractionError ?? "Extraction failed."}</p>
         )}
-        <a href={product.sourceUrl} target="_blank" rel="noreferrer">
-          {product.sourceUrl}
-        </a>
+        <div className="product-card__actions">
+          <a href={product.sourceUrl} target="_blank" rel="noreferrer">
+            {product.sourceUrl}
+          </a>
+          <button
+            className="product-card__delete"
+            type="button"
+            disabled={isDeleting || product.status === "queued"}
+            onClick={() => onDelete(product)}
+          >
+            {isDeleting ? "Deleting..." : "Delete"}
+          </button>
+        </div>
         <p className="product-card__meta">
           Added {new Date(product.addedAt).toLocaleString()}
         </p>

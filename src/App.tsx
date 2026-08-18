@@ -21,6 +21,7 @@ export default function App() {
   const [url, setUrl] = useState("");
   const [feedback, setFeedback] = useState<string | undefined>();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [deletingProductId, setDeletingProductId] = useState<string | undefined>();
 
   useEffect(() => {
     saveProducts(browserStorage(), products);
@@ -71,6 +72,33 @@ export default function App() {
       setFeedback(`Extraction failed: ${message}`);
     } finally {
       setIsSubmitting(false);
+    }
+  }
+
+  async function handleDelete(product: ProductRecord) {
+    if (!window.confirm("Delete this product?")) return;
+
+    setDeletingProductId(product.id);
+    try {
+      const response = await fetch(
+        `/api/products?source_url=${encodeURIComponent(product.sourceUrl)}`,
+        { method: "DELETE" },
+      );
+      const payload: unknown = await response.json();
+      if (!response.ok) {
+        const message =
+          typeof payload === "object" && payload !== null && "error" in payload
+            ? String(payload.error)
+            : "Product deletion failed.";
+        throw new Error(message);
+      }
+
+      setProducts((current) => current.filter((item) => item.id !== product.id));
+      setFeedback("Product deleted.");
+    } catch (error) {
+      setFeedback(error instanceof Error ? error.message : "Product deletion failed.");
+    } finally {
+      setDeletingProductId(undefined);
     }
   }
 
@@ -130,7 +158,12 @@ export default function App() {
         ) : (
           <div className="product-grid">
             {products.map((product) => (
-              <ProductCard key={product.id} product={product} />
+              <ProductCard
+                key={product.id}
+                product={product}
+                isDeleting={deletingProductId === product.id}
+                onDelete={handleDelete}
+              />
             ))}
           </div>
         )}

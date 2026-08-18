@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { readyProduct, upsertProduct } from "./products";
+import { deleteProduct, readyProduct, upsertProduct } from "./products";
 
 describe("product persistence", () => {
   afterEach(() => {
@@ -88,5 +88,31 @@ describe("product persistence", () => {
         }),
       ),
     ).rejects.toThrow("both server credentials");
+  });
+
+  it("deletes a product through the Supabase REST API", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      deleteProduct(
+        {
+          SUPABASE_URL: "https://example.supabase.co/",
+          SUPABASE_SERVICE_ROLE_KEY: "server-only-test-key",
+        },
+        "https://www.amazon.in/dp/B0GD6QSD4M",
+      ),
+    ).resolves.toBe(true);
+
+    const [endpoint, request] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(endpoint).toBe(
+      "https://example.supabase.co/rest/v1/products?source_url=eq.https%3A%2F%2Fwww.amazon.in%2Fdp%2FB0GD6QSD4M",
+    );
+    expect(request.method).toBe("DELETE");
+    expect(request.headers).toMatchObject({
+      apikey: "server-only-test-key",
+      Authorization: "Bearer server-only-test-key",
+      Prefer: "return=minimal",
+    });
   });
 });

@@ -1,5 +1,6 @@
 import { ExtractionResultSchema, normalizeProductUrl } from "./domain/product";
 import {
+  deleteProduct,
   failedProduct,
   queuedProduct,
   readyProduct,
@@ -68,6 +69,25 @@ export default {
           await upsertProduct(env, failedProduct(sourceUrl, message));
           return Response.json({ error: message }, { status: 502 });
         }
+      } catch (error) {
+        return Response.json({ error: safeErrorMessage(error) }, { status: 502 });
+      }
+    }
+
+    if (url.pathname === "/api/products") {
+      if (request.method !== "DELETE") {
+        return Response.json({ error: "Method not allowed" }, { status: 405 });
+      }
+
+      const sourceUrlInput = url.searchParams.get("source_url");
+      if (!sourceUrlInput) {
+        return Response.json({ error: "A product URL is required" }, { status: 400 });
+      }
+
+      try {
+        const sourceUrl = normalizeProductUrl(sourceUrlInput).toString();
+        await deleteProduct(env, sourceUrl);
+        return Response.json({ deleted: true });
       } catch (error) {
         return Response.json({ error: safeErrorMessage(error) }, { status: 502 });
       }
