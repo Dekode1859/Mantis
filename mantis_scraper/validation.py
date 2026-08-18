@@ -3,6 +3,12 @@ from dataclasses import dataclass
 from bs4 import BeautifulSoup
 
 from .models import SelectorConfiguration, SelectorOperation
+from .normalization import (
+    NormalizationError,
+    default_currency_for_url,
+    normalize_price,
+    normalize_title,
+)
 
 
 @dataclass(frozen=True)
@@ -36,6 +42,8 @@ def validate_selectors(html: str, configuration: SelectorConfiguration) -> Selec
         nodes = soup.select(rule.selector)
         matched_nodes[field_name] = len(nodes)
         if not nodes:
+            if field_name in {"asin", "seller"}:
+                continue
             issues.append(SelectorIssue(field_name, "selector matched no nodes"))
             continue
 
@@ -43,10 +51,21 @@ def validate_selectors(html: str, configuration: SelectorConfiguration) -> Selec
             values = [node.get(rule.attribute or "") for node in nodes]
             if not any(value for value in values):
                 issues.append(SelectorIssue(field_name, "attribute was missing or empty"))
-        elif not any(node.get_text(" ", strip=True) for node in nodes):
-            issues.append(SelectorIssue(field_name, "matched nodes had no text"))
+        else:
+            text = nodes[0].get_text(" ", strip=True)
+            if not text:
+                issues.append(SelectorIssue(field_name, "matched nodes had no text"))
+            elif field_name == "title":
+                try:
+                    normalize_title(text)
+                except NormalizationError as exc:
+                    issues.append(SelectorIssue(field_name, str(exc)))
+            elif field_name == "price":
+                try:
+                    normalize_price(text, default_currency_for_url(str(configuration.source_url)))
+                except NormalizationError as exc:
+                    issues.append(SelectorIssue(field_name, str(exc)))
 
     if issues:
         raise SelectorValidationError(issues)
     return SelectorValidationReport(matched_nodes=matched_nodes)
-

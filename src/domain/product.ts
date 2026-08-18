@@ -1,6 +1,15 @@
 import { z } from "zod";
 
 export const ProductStatusSchema = z.enum(["queued", "ready", "failed"]);
+const CurrencyCodeSchema = z.string().regex(/^[A-Z]{3}$/);
+const PriceSchema = z.preprocess(
+  (value) => {
+    if (typeof value !== "string") return value;
+    const parsed = Number(value.replace(/[^\d.,-]/g, "").replace(/,/g, ""));
+    return Number.isFinite(parsed) ? parsed : value;
+  },
+  z.number().finite().nonnegative().nullable(),
+);
 
 export const ProductRecordSchema = z.object({
   id: z.string().min(1),
@@ -8,7 +17,8 @@ export const ProductRecordSchema = z.object({
   site: z.string().min(1),
   status: ProductStatusSchema,
   title: z.string().min(1).nullable(),
-  price: z.string().min(1).nullable().default(null),
+  price: PriceSchema.default(null),
+  currency: CurrencyCodeSchema.nullable().default(null),
   asin: z.string().min(1).nullable().default(null),
   seller: z.string().min(1).nullable().default(null),
   extractionError: z.string().min(1).nullable().default(null),
@@ -21,7 +31,8 @@ export const ExtractionResultSchema = z.object({
   status: z.literal("ready"),
   source_url: z.string().url(),
   title: z.string().min(1),
-  price: z.string().min(1),
+  price: z.number().finite().nonnegative(),
+  currency: CurrencyCodeSchema,
   asin: z.string().min(1).nullable(),
   seller: z.string().min(1).nullable(),
 });
@@ -61,6 +72,7 @@ export function createQueuedProduct(input: string, addedAt = new Date()): Produc
     status: "queued",
     title: null,
     price: null,
+    currency: null,
     asin: null,
     seller: null,
     extractionError: null,
@@ -80,6 +92,7 @@ export function markProductReady(
           status: "ready",
           title: result.title,
           price: result.price,
+          currency: result.currency,
           asin: result.asin,
           seller: result.seller,
           extractionError: null,

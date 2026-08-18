@@ -1,6 +1,13 @@
 from bs4 import BeautifulSoup
 
 from .models import ExtractedProduct, SelectorConfiguration, SelectorOperation, SelectorRule
+from .normalization import (
+    default_currency_for_url,
+    normalize_identifier,
+    normalize_price,
+    normalize_seller,
+    normalize_title,
+)
 
 
 class DeterministicExtractionError(ValueError):
@@ -13,6 +20,8 @@ def _extract_value(soup: BeautifulSoup, field_name: str, rule: SelectorRule | No
 
     nodes = soup.select(rule.selector)
     if not nodes:
+        if field_name in {"asin", "seller"}:
+            return None
         raise DeterministicExtractionError(f"{field_name}: selector matched no nodes")
 
     if rule.operation is SelectorOperation.ATTRIBUTE:
@@ -26,14 +35,35 @@ def _extract_value(soup: BeautifulSoup, field_name: str, rule: SelectorRule | No
 
 def extract_product(html: str, configuration: SelectorConfiguration) -> ExtractedProduct:
     soup = BeautifulSoup(html, "html.parser")
-    values = {
+    raw_values = {
         field_name: _extract_value(soup, field_name, getattr(configuration.selectors, field_name))
         for field_name in ("title", "price", "asin", "seller")
     }
 
-    for field_name in ("title", "price"):
-        if not values[field_name]:
-            raise DeterministicExtractionError(f"{field_name}: extracted value was empty")
+    if not raw_values["title"]:
+        raise DeterministicExtractionError("title: extracted value was empty")
+    if not raw_values["price"]:
+        raise DeterministicExtractionError("price: extracted value was empty")
 
-    return ExtractedProduct(source_url=configuration.source_url, **values)
+    try:
+        title = normalize_title(raw_values["title"])
+        normalized_price = normalize_price(
+            raw_values["price"],
+            default_currency_for_url(str(configuration.source_url)),
+        )
+        try:
+            asin = normalize_identifier(raw_values["asin"])
+        except ValueError:
+            asin = None
+        seller = normalize_seller(raw_values["seller"])
+    except ValueError as exc:
+        raise DeterministicExtractionError(str(exc)) from exc
 
+    return ExtractedProduct(
+        source_url=configuration.source_url,
+        title=title,
+        price=normalized_price.amount,
+        currency=normalized_price.currency,
+        asin=asin,
+        seller=seller,
+    )

@@ -33,6 +33,7 @@ describe("product link flow", () => {
       status: "queued",
       title: null,
       price: null,
+      currency: null,
       asin: null,
       seller: null,
       extractionError: null,

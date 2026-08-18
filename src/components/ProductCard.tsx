@@ -4,6 +4,21 @@ type ProductCardProps = {
   product: ProductRecord;
 };
 
+function formatPrice(product: ProductRecord): string {
+  if (product.price === null || product.currency === null) return "Unavailable";
+
+  try {
+    const formatted = new Intl.NumberFormat("en-IN", {
+      style: "currency",
+      currency: product.currency,
+      maximumFractionDigits: 2,
+    }).format(product.price);
+    return `${formatted} (${product.currency})`;
+  } catch {
+    return `${product.price} ${product.currency}`;
+  }
+}
+
 export function ProductCard({ product }: ProductCardProps) {
   return (
     <article className="product-card">
@@ -20,15 +35,7 @@ export function ProductCard({ product }: ProductCardProps) {
           <dl className="product-card__details">
             <div>
               <dt>Price</dt>
-              <dd>{product.price ?? "Unavailable"}</dd>
-            </div>
-            <div>
-              <dt>Seller</dt>
-              <dd>{product.seller ?? "Unavailable"}</dd>
-            </div>
-            <div>
-              <dt>ASIN</dt>
-              <dd>{product.asin ?? "Unavailable"}</dd>
+              <dd>{formatPrice(product)}</dd>
             </div>
           </dl>
         )}

@@ -1,9 +1,20 @@
 from datetime import datetime, timezone
+from decimal import Decimal
 from enum import StrEnum
 from typing import Literal
 
 import soupsieve
-from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    AnyHttpUrl,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_serializer,
+    field_validator,
+    model_validator,
+)
+
+from .normalization import normalize_identifier, normalize_seller, normalize_title
 
 
 class SelectorOperation(StrEnum):
@@ -71,8 +82,27 @@ class ExtractedProduct(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     source_url: AnyHttpUrl
-    title: str
-    price: str
+    title: str = Field(min_length=3)
+    price: Decimal = Field(ge=0)
+    currency: str = Field(pattern=r"^[A-Z]{3}$")
     asin: str | None = None
     seller: str | None = None
 
+    @field_validator("title")
+    @classmethod
+    def validate_title(cls, value: str) -> str:
+        return normalize_title(value)
+
+    @field_validator("asin")
+    @classmethod
+    def validate_asin(cls, value: str | None) -> str | None:
+        return normalize_identifier(value)
+
+    @field_validator("seller")
+    @classmethod
+    def validate_seller(cls, value: str | None) -> str | None:
+        return normalize_seller(value)
+
+    @field_serializer("price")
+    def serialize_price(self, value: Decimal) -> float:
+        return float(value)

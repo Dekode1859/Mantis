@@ -1,4 +1,5 @@
 from pathlib import Path
+from decimal import Decimal
 
 import pytest
 from pydantic import ValidationError
@@ -6,6 +7,7 @@ from pydantic import ValidationError
 from mantis_scraper.discovery import SelectorDiscoveryAgent
 from mantis_scraper.extractor import extract_product
 from mantis_scraper.models import SelectorConfiguration
+from mantis_scraper.normalization import normalize_price, normalize_title
 from mantis_scraper.validation import validate_selectors
 
 
@@ -49,9 +51,20 @@ def test_validation_and_extraction_are_deterministic():
     assert report.matched_nodes == {"title": 1, "price": 1, "asin": 1, "seller": 1}
     assert first == second
     assert first.title == "Orbit Travel Mug"
-    assert first.price == "$29.99"
-    assert first.asin == "B0MANTIS001"
+    assert first.price == Decimal("29.99")
+    assert first.currency == "USD"
+    assert first.asin == "B0MANTIS01"
     assert first.seller == "Orbit Supply Co."
+
+
+def test_normalization_removes_currency_formatting_without_losing_amount():
+    price = normalize_price("₹ 3,190 . 00", default_currency="INR")
+
+    assert price.amount == 3190
+    assert price.currency == "INR"
+    assert normalize_title("Product Summary: Orbit Travel Mug : Amazon.in: Kitchen") == (
+        "Orbit Travel Mug"
+    )
 
 
 def test_discovery_calls_the_model_once_and_returns_selectors_only():
