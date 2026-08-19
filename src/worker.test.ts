@@ -107,9 +107,9 @@ describe("stored scraper configuration selection", () => {
     const scraper = {
       fetch: vi
         .fn()
-        .mockResolvedValueOnce({
-          json: () =>
-            Promise.resolve({
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
               status: "failed",
               error: {
                 code: "validation_error",
@@ -117,7 +117,9 @@ describe("stored scraper configuration selection", () => {
                 message: "price: selector matched no nodes",
               },
             }),
-        })
+            { status: 502 },
+          ),
+        )
         .mockResolvedValueOnce(
           new Response(JSON.stringify(extraction), { status: 200 }),
         ),
@@ -183,16 +185,18 @@ describe("stored scraper configuration selection", () => {
       .fn()
       .mockResolvedValue(new Response(JSON.stringify([configuration]), { status: 200 }));
     const scraper = {
-      fetch: vi.fn().mockResolvedValue({
-        json: () =>
-          Promise.resolve({
+      fetch: vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
             status: "failed",
             error: {
               code: "extraction_error",
               message: "The scraper exceeded its CPU budget while evaluating the page.",
             },
           }),
-      }),
+          { status: 502 },
+        ),
+      ),
     };
     vi.stubGlobal("fetch", fetchMock);
 
@@ -212,6 +216,31 @@ describe("stored scraper configuration selection", () => {
         method: "deterministic",
         status: "failed",
         trigger: "scheduled",
+      }),
+    );
+  });
+
+  it("models a non-JSON scraper runtime failure", async () => {
+    const logMock = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify([configuration]), { status: 200 }));
+    const scraper = {
+      fetch: vi.fn().mockResolvedValue(new Response("error code: 1101\n", { status: 500 })),
+    };
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      extractWithStoredConfigurations(
+        { ...envBase, SCRAPER: scraper } as Env,
+        extraction.source_url,
+        "scheduled",
+      ),
+    ).rejects.toThrow("Cloudflare 1101");
+    expect(logMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "failed",
+        error: "The scraper runtime failed while evaluating the page (Cloudflare 1101).",
       }),
     );
   });
@@ -432,6 +461,57 @@ describe("product API", () => {
         delaySeconds: 0,
       },
     ]);
+  });
+
+  it("records the deterministic configuration on a failed scheduled scan", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify([
+            {
+              id: "11111111-1111-4111-8111-111111111111",
+              source_url: "https://example.com/item",
+              site: "example.com",
+              status: "ready",
+              title: "Example item",
+              price: 100,
+              currency: "INR",
+              external_product_id: null,
+              seller_name: null,
+              extraction_error: null,
+              added_at: "2026-08-19T00:00:00.000Z",
+            },
+          ]),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify([configuration]), { status: 200 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify([{ id: "11111111-1111-4111-8111-111111111111" }]), {
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    const scraper = {
+      fetch: vi.fn().mockResolvedValue(new Response("error code: 1101\n", { status: 500 })),
+    };
+    vi.stubGlobal("fetch", fetchMock);
+
+    const summary = await runScheduledRefresh(
+      { ...envBase, SCRAPER: scraper } as Env,
+      new Date("2026-08-19T03:00:00.000Z"),
+    );
+
+    expect(summary).toMatchObject({ productCount: 1, succeeded: 0, failed: 1 });
+    const [, scanRequest] = fetchMock.mock.calls[5] as [string, RequestInit];
+    expect(JSON.parse(String(scanRequest.body))).toMatchObject({
+      scraper_configuration_id: configuration.id,
+      extraction_method: "deterministic",
+      status: "failed",
+    });
   });
 
   it("processes queued refreshes one at a time and acknowledges them", async () => {

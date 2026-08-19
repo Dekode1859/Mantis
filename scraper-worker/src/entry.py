@@ -79,6 +79,8 @@ HTML_CONTEXT_MARKERS = (
     "seller",
     "merchant",
 )
+SELECTOR_MARKER_PATTERN = re.compile(r"(?:#|\.)([A-Za-z_][\w:-]*)|\[([A-Za-z_][\w:-]*)")
+EVALUATION_HTML_MAX_CHARS = 120_000
 
 
 def clean_html(html: str) -> str:
@@ -86,14 +88,18 @@ def clean_html(html: str) -> str:
     return HTML_COMMENT.sub("", without_blocks)
 
 
-def trim_html(cleaned_html: str, max_chars: int) -> str:
+def trim_html(
+    cleaned_html: str,
+    max_chars: int,
+    markers: tuple[str, ...] = HTML_CONTEXT_MARKERS,
+) -> str:
     if len(cleaned_html) <= max_chars:
         return cleaned_html
 
     lowered = cleaned_html.lower()
     windows: list[tuple[int, int]] = []
     radius = 6_000
-    for marker in HTML_CONTEXT_MARKERS:
+    for marker in markers:
         start = 0
         occurrences = 0
         while occurrences < 4:
@@ -125,8 +131,27 @@ def trim_html(cleaned_html: str, max_chars: int) -> str:
     return selected[:half] + "\n<!-- content omitted -->\n" + selected[-half:]
 
 
+def selector_context_markers(
+    selectors: dict[str, dict[str, str | None] | None],
+) -> tuple[str, ...]:
+    markers = list(HTML_CONTEXT_MARKERS)
+    for rule in selectors.values():
+        if not rule:
+            continue
+        for match in SELECTOR_MARKER_PATTERN.finditer(rule.get("selector") or ""):
+            markers.extend(value.lower() for value in match.groups() if value)
+    return tuple(dict.fromkeys(markers))
+
+
 def model_html(html: str, max_chars: int = 120_000) -> str:
     return trim_html(html, max_chars)
+
+
+def evaluation_html(
+    html: str,
+    selectors: dict[str, dict[str, str | None] | None],
+) -> str:
+    return trim_html(html, EVALUATION_HTML_MAX_CHARS, selector_context_markers(selectors))
 
 
 def extraction_error(error: Exception) -> dict[str, str | None]:
@@ -556,13 +581,23 @@ class Default(WorkerEntrypoint):
         requested_selectors = payload.get("selectors")
         if requested_selectors is not None:
             selectors = validate_selectors({"selectors": requested_selectors})
-            return validate_and_extract(html, final_url, selectors, model)
+            return validate_and_extract(
+                evaluation_html(html, selectors),
+                final_url,
+                selectors,
+                model,
+            )
 
         feedback = "None. This is the first proposal."
         for _ in range(2):
             try:
                 selectors = await self.call_model(final_url, html, feedback)
-                return validate_and_extract(html, final_url, selectors, model)
+                return validate_and_extract(
+                    evaluation_html(html, selectors),
+                    final_url,
+                    selectors,
+                    model,
+                )
             except Exception as exc:
                 feedback = str(exc)
         raise ValueError(feedback)

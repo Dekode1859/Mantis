@@ -66,6 +66,29 @@ type ProductExtractionProcess =
   | { ok: true; result: ExtractionRoute }
   | { ok: false; error: string };
 
+interface ExtractionFailureMetadata {
+  method: ExtractionMethod;
+  configurationId: string | null;
+  configurationVersion: number | null;
+  model: string | null;
+}
+
+class ExtractionFailure extends Error {
+  readonly method: ExtractionMethod;
+  readonly configurationId: string | null;
+  readonly configurationVersion: number | null;
+  readonly model: string | null;
+
+  constructor(message: string, metadata: ExtractionFailureMetadata) {
+    super(message);
+    this.name = "ExtractionFailure";
+    this.method = metadata.method;
+    this.configurationId = metadata.configurationId;
+    this.configurationVersion = metadata.configurationVersion;
+    this.model = metadata.model;
+  }
+}
+
 export interface ScheduledRefreshSummary {
   scheduledAt: string;
   productCount: number;
@@ -95,8 +118,15 @@ function isExtractRequest(value: unknown): value is ExtractRequest {
 
 function safeErrorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : "Extraction failed";
-  if (message.includes("CpuLimitExceeded") || message.includes("CPU time limit")) {
-    return "The scraper exceeded its CPU budget while evaluating the page.";
+  if (
+    message.includes("CpuLimitExceeded") ||
+    message.includes("CPU time limit") ||
+    /error code:\s*1102/i.test(message)
+  ) {
+    return "The scraper exceeded its CPU budget while evaluating the page (Cloudflare 1102).";
+  }
+  if (/error code:\s*1101/i.test(message)) {
+    return "The scraper runtime failed while evaluating the page (Cloudflare 1101).";
   }
   if (message.includes("Traceback (most recent call last)")) {
     return "The scraper failed while evaluating the page.";
@@ -153,9 +183,33 @@ async function callScraper(
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
-      });
+  });
   if (!response) throw new Error("The scraper service is not configured.");
-  return response.json();
+  const body = await response.text();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return {
+      status: "failed",
+      error: {
+        code: "scraper_http_error",
+        message: `Scraper returned HTTP ${response.status} with a non-JSON response: ${
+          body.trim().slice(0, 240) || "empty body"
+        }`,
+      },
+    };
+  }
+  if (!response.ok && (!parsed || typeof parsed !== "object" || !("status" in parsed))) {
+    return {
+      status: "failed",
+      error: {
+        code: "scraper_http_error",
+        message: `Scraper returned HTTP ${response.status}.`,
+      },
+    };
+  }
+  return parsed;
 }
 
 function logExtractionAttempt(input: {
@@ -233,6 +287,7 @@ export async function extractWithStoredConfigurations(
         durationMs: Date.now() - startedAt,
       };
     } catch (error) {
+      const failureMessage = safeErrorMessage(error);
       logExtractionAttempt({
         sourceUrl,
         site,
@@ -244,10 +299,10 @@ export async function extractWithStoredConfigurations(
         configurationId: configuration.id,
         configurationVersion: configuration.version,
         configurationSource: configuration.source,
-        error: safeErrorMessage(error),
+        error: failureMessage,
       });
       deterministicFailures.push(
-        `${configuration.id} (v${configuration.version}): ${safeErrorMessage(error)}`,
+        `${configuration.id} (v${configuration.version}): ${failureMessage.replace(/[.]+$/, "")}`,
       );
     }
   }
@@ -256,7 +311,13 @@ export async function extractWithStoredConfigurations(
     const message = deterministicFailures.length
       ? `Deterministic configurations failed: ${deterministicFailures.join("; ")}.`
       : "No deterministic scraper configuration is available for scheduled refresh.";
-    throw new Error(message);
+    const configuration = configurations[configurations.length - 1];
+    throw new ExtractionFailure(message, {
+      method: "deterministic",
+      configurationId: configuration?.id ?? null,
+      configurationVersion: configuration?.version ?? null,
+      model: configuration?.model ?? null,
+    });
   }
 
   const startedAt = Date.now();
@@ -282,7 +343,12 @@ export async function extractWithStoredConfigurations(
     const deterministicMessage = deterministicFailures.length
       ? ` Deterministic configurations failed: ${deterministicFailures.join("; ")}.`
       : "";
-    throw new Error(`${safeErrorMessage(error)}${deterministicMessage}`);
+    throw new ExtractionFailure(`${safeErrorMessage(error)}${deterministicMessage}`, {
+      method: "llm",
+      configurationId: null,
+      configurationVersion: null,
+      model: null,
+    });
   }
 
   const configuration = await saveScraperConfiguration(
@@ -344,16 +410,17 @@ async function processProductExtraction(
     return { ok: true, result };
   } catch (error) {
     const message = safeErrorMessage(error);
+    const failure = error instanceof ExtractionFailure ? error : undefined;
     await upsertProduct(env, failedProduct(sourceUrl, message));
     await insertProductScan(env, {
       sourceUrl,
-      scraperConfigurationId: null,
-      method: trigger === "scheduled" ? "deterministic" : "llm",
+      scraperConfigurationId: failure?.configurationId ?? null,
+      method: failure?.method ?? (trigger === "scheduled" ? "deterministic" : "llm"),
       trigger,
       actor: actorForTrigger(trigger),
       status: "failed",
       extraction: null,
-      model: null,
+      model: failure?.model ?? null,
       durationMs: Date.now() - scanStartedAt,
       extractionError: message,
     });
