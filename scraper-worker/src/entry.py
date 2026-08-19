@@ -400,6 +400,11 @@ class Default(WorkerEntrypoint):
         html = await page.text()
         final_url = page.url
         model = getattr(self.env, "OLLAMA_MODEL", "gpt-oss:120b")
+        requested_selectors = payload.get("selectors")
+        if requested_selectors is not None:
+            selectors = validate_selectors({"selectors": requested_selectors})
+            return validate_and_extract(html, final_url, selectors, model)
+
         feedback = "None. This is the first proposal."
         for _ in range(2):
             try:

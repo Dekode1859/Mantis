@@ -1,4 +1,8 @@
-import { ExtractionResultSchema, normalizeProductUrl } from "./domain/product";
+import {
+  ExtractionResultSchema,
+  normalizeProductUrl,
+  type ExtractionResult,
+} from "./domain/product";
 import {
   deleteProduct,
   failedProduct,
@@ -6,11 +10,15 @@ import {
   readyProduct,
   upsertProduct,
 } from "./server/products";
+import {
+  listScraperConfigurations,
+  saveScraperConfiguration,
+} from "./server/scrapers";
 
-interface Env {
+export interface Env {
   ASSETS: Fetcher;
   SCRAPER: {
-    extract_product(payload: { url: string }): Promise<unknown>;
+    extract_product(payload: { url: string; selectors?: unknown }): Promise<unknown>;
   };
   SUPABASE_URL?: string;
   SUPABASE_SERVICE_ROLE_KEY?: string;
@@ -36,6 +44,40 @@ function safeErrorMessage(error: unknown): string {
   return message;
 }
 
+export async function extractWithStoredConfigurations(
+  env: Env,
+  sourceUrl: string,
+): Promise<{ extraction: ExtractionResult; configurationId: string | null }> {
+  const site = new URL(sourceUrl).hostname.replace(/^www\./, "");
+  const configurations = await listScraperConfigurations(env, site);
+
+  for (const configuration of configurations) {
+    try {
+      const extraction = ExtractionResultSchema.parse(
+        await env.SCRAPER.extract_product({
+          url: sourceUrl,
+          selectors: configuration.selectors,
+        }),
+      );
+      return { extraction, configurationId: configuration.id };
+    } catch {
+      // A configuration is only reused when its deterministic extraction validates.
+    }
+  }
+
+  const extraction = ExtractionResultSchema.parse(
+    await env.SCRAPER.extract_product({ url: sourceUrl }),
+  );
+  const configuration = await saveScraperConfiguration(
+    env,
+    site,
+    extraction,
+    sourceUrl,
+    configurations,
+  );
+  return { extraction, configurationId: configuration?.id ?? null };
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -59,11 +101,12 @@ export default {
         await upsertProduct(env, queuedProduct(sourceUrl));
 
         try {
-          const extraction = ExtractionResultSchema.parse(
-            await env.SCRAPER.extract_product({ url: sourceUrl }),
+          const result = await extractWithStoredConfigurations(env, sourceUrl);
+          await upsertProduct(
+            env,
+            readyProduct(sourceUrl, result.extraction, result.configurationId),
           );
-          await upsertProduct(env, readyProduct(sourceUrl, extraction));
-          return Response.json(extraction);
+          return Response.json(result.extraction);
         } catch (error) {
           const message = safeErrorMessage(error);
           await upsertProduct(env, failedProduct(sourceUrl, message));

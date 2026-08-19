@@ -2,6 +2,44 @@ import { z } from "zod";
 
 export const ProductStatusSchema = z.enum(["queued", "ready", "failed"]);
 const CurrencyCodeSchema = z.string().regex(/^[A-Z]{3}$/);
+const SelectorRuleSchema = z.object({
+  selector: z.string().min(1),
+  operation: z.enum(["text", "attribute"]),
+  attribute: z.string().nullable(),
+});
+
+export const SelectorConfigurationSchema = z.object({
+  title: SelectorRuleSchema.nullable(),
+  price: SelectorRuleSchema.nullable(),
+  asin: SelectorRuleSchema.nullable(),
+  seller: SelectorRuleSchema.nullable(),
+});
+
+export type SelectorConfiguration = z.infer<typeof SelectorConfigurationSchema>;
+
+const DatabaseTimestampSchema = z.preprocess(
+  (value) => {
+    if (typeof value !== "string") return value;
+    const isoValue = value.replace(" ", "T");
+    return isoValue.replace(/([+-]\d{2})$/, "$1:00");
+  },
+  z.string().datetime({ offset: true }),
+);
+
+export const ScraperConfigurationSchema = z.object({
+  id: z.string().uuid(),
+  site: z.string().min(1),
+  version: z.number().int().positive(),
+  configuration_hash: z.string().regex(/^[0-9a-f]{64}$/),
+  selectors: SelectorConfigurationSchema,
+  model: z.string().min(1),
+  source: z.enum(["llm", "manual"]),
+  metadata: z.record(z.string(), z.unknown()),
+  created_at: DatabaseTimestampSchema,
+});
+
+export type ScraperConfiguration = z.infer<typeof ScraperConfigurationSchema>;
+
 const PriceSchema = z.preprocess(
   (value) => {
     if (typeof value !== "string") return value;
@@ -35,6 +73,8 @@ export const ExtractionResultSchema = z.object({
   currency: CurrencyCodeSchema,
   asin: z.string().min(1).nullable(),
   seller: z.string().min(1).nullable(),
+  selectors: SelectorConfigurationSchema.optional(),
+  model: z.string().min(1).optional(),
 });
 
 export type ExtractionResult = z.infer<typeof ExtractionResultSchema>;

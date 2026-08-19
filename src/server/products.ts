@@ -15,6 +15,7 @@ export interface ProductWrite {
   asin: string | null;
   seller: string | null;
   extractionError: string | null;
+  scraperConfigurationId?: string | null;
 }
 
 function siteFromUrl(sourceUrl: string): string {
@@ -32,6 +33,9 @@ function toRow(product: ProductWrite) {
     external_product_id: product.asin,
     seller_name: product.seller,
     extraction_error: product.extractionError,
+    ...(product.scraperConfigurationId === undefined
+      ? {}
+      : { scraper_configuration_id: product.scraperConfigurationId }),
     last_extracted_at: product.status === "queued" ? null : new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };
@@ -108,7 +112,7 @@ export async function deleteProduct(
   return true;
 }
 
-function supabaseConfig(
+export function supabaseConfig(
   env: ProductPersistenceEnv,
 ): { url: string; key: string } | undefined {
   if (!env.SUPABASE_URL && !env.SUPABASE_SERVICE_ROLE_KEY) {
@@ -137,7 +141,11 @@ export function queuedProduct(sourceUrl: string): ProductWrite {
   };
 }
 
-export function readyProduct(sourceUrl: string, extraction: ExtractionResult): ProductWrite {
+export function readyProduct(
+  sourceUrl: string,
+  extraction: ExtractionResult,
+  scraperConfigurationId?: string | null,
+): ProductWrite {
   return {
     sourceUrl,
     site: siteFromUrl(sourceUrl),
@@ -148,6 +156,7 @@ export function readyProduct(sourceUrl: string, extraction: ExtractionResult): P
     asin: extraction.asin,
     seller: extraction.seller,
     extractionError: null,
+    scraperConfigurationId,
   };
 }
 
