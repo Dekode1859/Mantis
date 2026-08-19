@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { deleteProduct, readyProduct, upsertProduct } from "./products";
+import { deleteProduct, listProducts, readyProduct, upsertProduct } from "./products";
 
 describe("product persistence", () => {
   afterEach(() => {
@@ -114,5 +114,87 @@ describe("product persistence", () => {
       Authorization: "Bearer server-only-test-key",
       Prefer: "return=minimal",
     });
+  });
+
+  it("validates and maps database products into card records", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify([
+          {
+            id: "11111111-1111-4111-8111-111111111111",
+            source_url: "https://www.amazon.in/dp/B0GD6QSD4M",
+            site: "amazon.in",
+            status: "ready",
+            title: "Power bank",
+            price: "3,499.00",
+            currency: "INR",
+            external_product_id: "B0GD6QSD4M",
+            seller_name: "Example seller",
+            extraction_error: null,
+            added_at: "2026-08-19 00:00:00+00",
+          },
+        ]),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      listProducts({
+        SUPABASE_URL: "https://example.supabase.co",
+        SUPABASE_SERVICE_ROLE_KEY: "server-only-test-key",
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        id: "11111111-1111-4111-8111-111111111111",
+        sourceUrl: "https://www.amazon.in/dp/B0GD6QSD4M",
+        price: 3499,
+        currency: "INR",
+        addedAt: "2026-08-19T00:00:00.000Z",
+      }),
+    ]);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://example.supabase.co/rest/v1/products?select=id,source_url,site,status,title,price,currency,external_product_id,seller_name,extraction_error,added_at&order=added_at.desc",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          apikey: "server-only-test-key",
+          Authorization: "Bearer server-only-test-key",
+        }),
+      }),
+    );
+  });
+
+  it("rejects malformed database products", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify([
+            {
+              id: "not-a-valid-row",
+              source_url: "https://example.com/item",
+              site: "example.com",
+              status: "ready",
+              title: "Example",
+              price: "not-a-price",
+              currency: "USD",
+              external_product_id: null,
+              seller_name: null,
+              extraction_error: null,
+              added_at: "2026-08-19T00:00:00.000Z",
+            },
+          ]),
+          { status: 200 },
+        ),
+      ),
+    );
+
+    await expect(
+      listProducts({
+        SUPABASE_URL: "https://example.supabase.co",
+        SUPABASE_SERVICE_ROLE_KEY: "server-only-test-key",
+      }),
+    ).rejects.toThrow();
   });
 });

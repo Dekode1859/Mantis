@@ -6,6 +6,9 @@ import {
 import {
   deleteProduct,
   failedProduct,
+  listProducts,
+  PRODUCTS_CACHE_CONTROL,
+  PRODUCTS_CACHE_KEY,
   queuedProduct,
   readyProduct,
   upsertProduct,
@@ -322,6 +325,41 @@ export default {
     }
 
     if (url.pathname === "/api/products") {
+      if (request.method === "GET") {
+        try {
+          const cacheKey = new Request(PRODUCTS_CACHE_KEY);
+          const cache =
+            typeof caches === "undefined"
+              ? undefined
+              : (caches as unknown as { default?: Cache }).default;
+          const cached = cache ? await cache.match(cacheKey) : undefined;
+          if (cached) return cached;
+
+          const products = await listProducts(env);
+          if (!products) {
+            return Response.json(
+              { error: "Supabase persistence is not configured." },
+              { status: 503 },
+            );
+          }
+
+          const response = Response.json(products, {
+            headers: {
+              "Cache-Control": PRODUCTS_CACHE_CONTROL,
+              "X-Products-Source": "database",
+            },
+          });
+          if (cache) {
+            try {
+              await cache.put(cacheKey, response.clone());
+            } catch {}
+          }
+          return response;
+        } catch (error) {
+          return Response.json({ error: safeErrorMessage(error) }, { status: 502 });
+        }
+      }
+
       if (request.method !== "DELETE") {
         return Response.json({ error: "Method not allowed" }, { status: 405 });
       }

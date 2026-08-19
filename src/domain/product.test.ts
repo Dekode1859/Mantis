@@ -6,7 +6,14 @@ import {
   markProductQueued,
   normalizeProductUrl,
 } from "./product";
-import { loadProducts, productStorageKey, saveProducts } from "./product-store";
+import {
+  isProductCacheFresh,
+  loadProducts,
+  markProductsCached,
+  productCacheTimestampKey,
+  productStorageKey,
+  saveProducts,
+} from "./product-store";
 
 describe("product link flow", () => {
   it("normalizes a product URL without its fragment", () => {
@@ -62,6 +69,20 @@ describe("product link flow", () => {
 
     expect(values.has(productStorageKey)).toBe(true);
     expect(loadProducts(storage)).toEqual(products);
+  });
+
+  it("tracks when the browser cache was last loaded from the server", () => {
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+    };
+
+    markProductsCached(storage, 10_000);
+
+    expect(values.get(productCacheTimestampKey)).toBe("10000");
+    expect(isProductCacheFresh(storage, 10_000 + 59_999)).toBe(true);
+    expect(isProductCacheFresh(storage, 10_000 + 60_000)).toBe(false);
   });
 
   it("moves a failed product back to queued for retry", () => {

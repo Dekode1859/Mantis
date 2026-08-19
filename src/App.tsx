@@ -1,15 +1,21 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 
 import { ProductCard } from "./components/ProductCard";
 import {
   addProduct,
   ExtractionResultSchema,
+  ProductRecordSchema,
   markProductFailed,
   markProductQueued,
   markProductReady,
   type ProductRecord,
 } from "./domain/product";
-import { loadProducts, saveProducts } from "./domain/product-store";
+import {
+  isProductCacheFresh,
+  loadProducts,
+  markProductsCached,
+  saveProducts,
+} from "./domain/product-store";
 
 function browserStorage(): Storage | undefined {
   return typeof window === "undefined" ? undefined : window.localStorage;
@@ -24,10 +30,47 @@ export default function App() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [deletingProductId, setDeletingProductId] = useState<string | undefined>();
   const [retryingProductId, setRetryingProductId] = useState<string | undefined>();
+  const hasLocalChanges = useRef(false);
 
   useEffect(() => {
     saveProducts(browserStorage(), products);
   }, [products]);
+
+  useEffect(() => {
+    const storage = browserStorage();
+    if (isProductCacheFresh(storage)) return;
+
+    let cancelled = false;
+
+    async function syncProducts() {
+      try {
+        const response = await fetch("/api/products", {
+          headers: { Accept: "application/json" },
+        });
+        const payload: unknown = await response.json();
+        if (!response.ok) {
+          const message =
+            typeof payload === "object" && payload !== null && "error" in payload
+              ? String(payload.error)
+              : "Product sync failed.";
+          throw new Error(message);
+        }
+
+        const syncedProducts = ProductRecordSchema.array().parse(payload);
+        if (cancelled || hasLocalChanges.current) return;
+
+        setProducts(syncedProducts);
+        saveProducts(storage, syncedProducts);
+        markProductsCached(storage);
+      } catch {
+      }
+    }
+
+    void syncProducts();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function extractProduct(product: ProductRecord, trigger: "add" | "retry") {
     try {
@@ -72,6 +115,7 @@ export default function App() {
     }
 
     setProducts(result.products);
+    hasLocalChanges.current = true;
     setUrl("");
     setIsSubmitting(true);
     setFeedback("Product added. Extracting product details...");
@@ -87,6 +131,7 @@ export default function App() {
     if (isSubmitting) return;
 
     setProducts((current) => markProductQueued(current, product.id));
+    hasLocalChanges.current = true;
     setRetryingProductId(product.id);
     setIsSubmitting(true);
     setFeedback("Retrying product extraction...");
@@ -118,6 +163,7 @@ export default function App() {
       }
 
       setProducts((current) => current.filter((item) => item.id !== product.id));
+      hasLocalChanges.current = true;
       setFeedback("Product deleted.");
     } catch (error) {
       setFeedback(error instanceof Error ? error.message : "Product deletion failed.");

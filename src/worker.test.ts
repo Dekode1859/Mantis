@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { extractWithStoredConfigurations, type Env } from "./worker";
+import worker, { extractWithStoredConfigurations, type Env } from "./worker";
 
 const envBase = {
   ASSETS: {} as Fetcher,
@@ -156,5 +156,56 @@ describe("stored scraper configuration selection", () => {
         configuration_id: savedConfiguration.id,
       }),
     );
+  });
+});
+
+describe("product API", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("returns validated products from the persistence layer", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify([
+            {
+              id: "11111111-1111-4111-8111-111111111111",
+              source_url: "https://example.com/item",
+              site: "example.com",
+              status: "ready",
+              title: "Example item",
+              price: 100,
+              currency: "INR",
+              external_product_id: null,
+              seller_name: null,
+              extraction_error: null,
+              added_at: "2026-08-19T00:00:00.000Z",
+            },
+          ]),
+          { status: 200 },
+        ),
+      ),
+    );
+
+    const response = await worker.fetch(
+      new Request("https://mantis-preview.example/api/products"),
+      {
+        ...envBase,
+        SCRAPER: { extract_product: vi.fn() },
+      } as Env,
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual([
+      expect.objectContaining({
+        sourceUrl: "https://example.com/item",
+        title: "Example item",
+        price: 100,
+        currency: "INR",
+      }),
+    ]);
   });
 });
