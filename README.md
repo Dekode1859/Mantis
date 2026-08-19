@@ -1,8 +1,8 @@
 # Mantis
 
-Mantis is a product-link tracker with a selector-discovery layer and a deterministic extraction engine. The language model is used to discover a scraper configuration when a site is new or when a stored configuration no longer works. Once a configuration is known, product refreshes use the stored selectors without calling the model again.
+Mantis keeps track of product links with a small selector-discovery step and a deterministic extraction engine. The language model is used to find the right selectors when a website is new or when a stored configuration no longer works. Once a configuration is known, product refreshes use those selectors without calling the model again.
 
-The result is a system that becomes cheaper and more predictable as it learns the structure of each site. The model proposes how to find a value; the application owns fetching, validation, normalization, persistence, refresh history, and failure handling.
+The system gets cheaper and more predictable as it learns each website. The model only suggests where each value is. The code fetches the page, checks the result, cleans it up, saves it, and records what happened.
 
 ## Architecture
 
@@ -30,14 +30,14 @@ flowchart LR
 
 There are two Worker services:
 
-- The application Worker serves the UI, product APIs, scheduled refreshes, queue consumption, configuration lookup, and Supabase persistence.
-- The scraper Worker fetches product pages and returns validated product data. It can perform deterministic extraction from supplied selectors or discover selectors through Ollama Cloud.
+- The application Worker serves the UI, product APIs, scheduled refreshes, queue processing, configuration lookup, and database writes.
+- The scraper Worker fetches product pages and returns checked product data. It can use supplied selectors or discover selectors through Ollama Cloud.
 
-The deployed path uses a small Python HTML parser in the scraper Worker. The local Python engine uses BeautifulSoup and exposes the same selector, normalization, and artifact concepts for repeatable experiments.
+The deployed path uses a small Python HTML parser in the scraper Worker. The local Python engine uses BeautifulSoup and follows the same selector, cleaning, and artifact steps for repeatable experiments.
 
-## The extraction model
+## How extraction works
 
-The model is not the scraper. It is a bounded selector-discovery assistant.
+The model is not the scraper. It is only used to find selectors, and it receives a limited amount of cleaned page HTML.
 
 ```mermaid
 flowchart TD
@@ -60,16 +60,16 @@ flowchart TD
     OUTPUT_VALIDATION -->|fail, no retry remains| FAILED
 ```
 
-For a new site, the first successful add normally takes the discovery path. The model receives a bounded, cleaned view of the page and returns selectors for:
+For a new website, the first successful add normally takes the discovery path. The model receives a limited, cleaned view of the page and returns selectors for:
 
 - product title;
 - current price;
 - product identifier such as an ASIN when present; and
 - seller when present.
 
-It does not return the extracted product values as the source of truth. After a selector proposal is accepted, the same deterministic extraction code reads the values from the page and produces the final result.
+It does not return the product values themselves. It only tells us where to find them. After the selectors are accepted, the same deterministic code reads the values from the page and produces the final result.
 
-For a later product on the same site, the application tries the stored site configurations first. If one works, there is no model call and no new configuration. If a configuration fails during an interactive add, retry, or manual extraction, the model can receive the validation feedback and propose a replacement. Scheduled refreshes intentionally remain deterministic-only so a background run cannot create unbounded model spend.
+For a later product on the same site, the application tries the stored site configurations first. If one works, there is no model call and no new configuration. If a configuration fails while adding, retrying, or manually extracting a product, the model can use the failure details to propose a replacement. Scheduled refreshes stay deterministic-only so background scans do not create unexpected model usage or cost.
 
 ## Why repeated use gets cheaper
 
@@ -87,19 +87,19 @@ graph LR
     I --> E
 ```
 
-The expensive operation is concentrated at the boundary where the system learns a site. The steady state is a page fetch, a bounded parse, selector matching, normalization, and a typed database write. Configuration hashes also prevent the same selector set from being stored repeatedly.
+The model is mainly used when the system first learns a website. After that, each refresh is just a page fetch, a limited parse, selector matching, cleanup, and a checked database write. Configuration hashes also stop the same selector set from being stored repeatedly.
 
 ## Validation and normalization
 
-Validation happens at more than one boundary so a successful HTTP response is not mistaken for a valid extraction.
+The data is checked at several points so a successful HTTP response is not mistaken for a valid extraction.
 
 ### Selector validation
 
-The selector contract accepts only the expected fields and rejects malformed proposals. Each selector is checked for:
+The selector rules accept only the expected fields and reject malformed proposals. Each selector is checked for:
 
 - a non-empty, bounded CSS expression;
 - supported tags, IDs, classes, attributes, and simple selector paths;
-- no comma selector groups or unbounded selector structures;
+- no comma selector groups or selectors that are too complex;
 - valid text versus attribute operation; and
 - a required attribute name when the operation is `attribute`.
 
@@ -107,7 +107,7 @@ Required fields are title and price. ASIN and seller are optional because a page
 
 ### Extracted value validation
 
-The deterministic result is normalized before it reaches the UI or database:
+The deterministic result is cleaned and checked before it reaches the UI or database:
 
 - titles have whitespace collapsed and page-specific noise removed;
 - prices become numeric values rather than formatted strings;
@@ -118,13 +118,13 @@ The deterministic result is normalized before it reaches the UI or database:
 - identifiers are normalized to uppercase and invalid identifiers are discarded; and
 - seller names are whitespace-normalized.
 
-The application Worker validates the final response with Zod. The local Python engine uses Pydantic models, and the scraper Worker applies the same boundary checks explicitly because it runs in Cloudflare's Python Worker runtime.
+The application Worker checks the final response with Zod. The local Python engine uses Pydantic models, and the scraper Worker applies the same checks directly because it runs in Cloudflare's Python Worker runtime.
 
-Supabase adds a second persistence boundary with constraints for product status, non-negative prices, three-letter currency codes, configuration versions, selector JSON, and foreign keys between products, configurations, and scans.
+The database checks the data again with rules for product status, non-negative prices, three-letter currency codes, configuration versions, selector JSON, and links between products, configurations, and scans.
 
 ## CPU and HTML efficiency
 
-Cloudflare Workers impose execution limits, so the scraper avoids repeatedly walking a full product document.
+Cloudflare puts a limit on how much work a Worker can do, so the scraper avoids repeatedly walking a full product document.
 
 ```mermaid
 flowchart LR
@@ -146,9 +146,9 @@ The deployed scraper:
 6. limits selector complexity to a small supported CSS subset; and
 7. extracts and normalizes values without another model call.
 
-The model input is also bounded to the cleaned context rather than the complete response. This reduces prompt size, memory pressure, DOM work, and the chance that unrelated page content affects selector discovery.
+The model also receives only the cleaned context instead of the complete response. This means less prompt data, less memory use, less DOM work, and less unrelated page content influencing selector discovery.
 
-The queue keeps scheduled work controlled: the current preview uses one-message batches, one concurrent consumer, and a short delay between products. A slow page therefore affects one refresh at a time instead of causing a large parallel burst.
+The queue also keeps scheduled work controlled: the current preview uses one-message batches, one concurrent consumer, and a short delay between products. A slow page therefore affects one refresh at a time instead of causing a large burst of work.
 
 ## Persistence model
 
@@ -195,17 +195,17 @@ erDiagram
 
 ### Products
 
-The `products` table stores the current user-facing state. A successful extraction updates the title, numeric price, currency, identifier, seller, configuration assignment, and `last_extracted_at`.
+The `products` table stores what we currently know about each product and what the user sees. A successful extraction updates the title, numeric price, currency, identifier, seller, the scraper configuration used, and `last_extracted_at`.
 
-When a refresh is queued or fails, the write changes the status, error, and `updated_at` but does not send replacement title or price fields. Supabase's merge-upsert therefore keeps the last known product values available while showing that the latest attempt failed.
+When a refresh is queued or fails, the write changes the status, error, and `updated_at` but does not replace the title or price. Supabase's merge-upsert keeps the last known product values available while showing that the latest attempt failed.
 
 ### Scraper configurations
 
-Each configuration is scoped to a site and stores selectors, model metadata, source, a canonical SHA-256 hash, and a positive version. Products reference the configuration that produced their latest successful extraction. A changed selector set becomes a new version instead of silently overwriting the previous configuration.
+Each configuration belongs to a website and stores selectors, model details, source, a canonical SHA-256 hash, and a version. Products point to the configuration that produced their latest successful extraction. A changed selector set becomes a new version instead of silently replacing the previous one.
 
 ### Product scans
 
-`product_scans` is a compact audit trail rather than a copy of the full page. Each row records the extraction method, trigger, actor, configuration, status, duration, normalized values when successful, and the error when it fails. This makes it possible to compare deterministic and LLM usage without storing full HTML for every refresh.
+`product_scans` is a small history of each scan rather than a copy of the full page. Each row records the extraction method, trigger, actor, configuration, status, duration, cleaned values when successful, and the error when it fails. This shows how often the deterministic path or the model path was used without storing full HTML for every refresh.
 
 ## Caching and history UX
 
@@ -237,9 +237,9 @@ sequenceDiagram
     end
 ```
 
-The product list is cached in the browser for 30 minutes and also cached at the Worker boundary for 30 minutes with stale-while-revalidate. A cache-version marker forces a one-time re-sync when the product response shape changes.
+The product list is cached in the browser for 30 minutes and also cached by the Worker for 30 minutes, while allowing an older response to be used briefly during an update. A small cache-version marker forces one re-sync when the product response shape changes.
 
-Scan history is deliberately gated behind the product detail action. If history has already been loaded, the detail page renders it from browser storage; the button remains available to fetch the current history again. This keeps the normal collection view lightweight while preserving access to the full extraction sequence when it is useful.
+We only load scan history when someone opens a product and asks for it. If history has already been loaded, the detail page renders it from browser storage; the button remains available to fetch the current history again. This keeps the normal product list light while preserving the full extraction sequence when it is useful.
 
 The product card shows the last successful extraction time and, for failed products, the latest failed attempt. The detail page shows both timestamps and can display the individual scan sequence, including the method, configuration, actor, trigger, duration, and error.
 
@@ -273,7 +273,7 @@ sequenceDiagram
     App->>DB: append compact scan metadata
 ```
 
-The explicit separation between interactive discovery and scheduled deterministic refreshes keeps background execution bounded and makes model usage visible in scan history and Worker logs.
+Keeping interactive discovery separate from scheduled deterministic refreshes keeps background work limited and makes model usage visible in scan history and Worker logs.
 
 ## Local development
 
@@ -327,7 +327,7 @@ Each local run is written under `data/runs/` and includes:
 - `extraction.json`: normalized product output; and
 - `attempts.json` or `failure.json`: validation and retry evidence.
 
-These local artifacts are useful for reviewing extraction behavior. The deployed preview currently persists structured product, configuration, and scan metadata in Supabase; it does not yet write raw HTML to Cloudflare Artifact or R2 storage.
+These local files are useful for reviewing extraction behavior. The deployed preview currently saves product, configuration, and scan details in Supabase; it does not yet write raw HTML to Cloudflare Artifact or R2 storage.
 
 ## Deployment
 
@@ -346,7 +346,7 @@ Current preview endpoints:
 - Application health: <https://mantis-preview.prateekdwivedi30.workers.dev/api/health>
 - Scraper health: <https://mantis-scraper-preview.prateekdwivedi30.workers.dev/api/health>
 
-## Verification surface
+## How to inspect what happened
 
 The system exposes evidence at three levels:
 
