@@ -46,6 +46,8 @@ describe("product link flow", () => {
       asin: null,
       seller: null,
       extractionError: null,
+      lastExtractedAt: null,
+      lastAttemptedAt: "2026-08-18T00:00:00.000Z",
       addedAt: "2026-08-18T00:00:00.000Z",
     });
   });
@@ -84,6 +86,18 @@ describe("product link flow", () => {
     expect(values.get(productCacheTimestampKey)).toBe("10000");
     expect(isProductCacheFresh(storage, 10_000 + productCacheTtlMs - 1)).toBe(true);
     expect(isProductCacheFresh(storage, 10_000 + productCacheTtlMs)).toBe(false);
+  });
+
+  it("forces a sync when the cached product shape is outdated", () => {
+    const values = new Map<string, string>([
+      [productCacheTimestampKey, "10000"],
+    ]);
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+    };
+
+    expect(isProductCacheFresh(storage, 10_000 + 1)).toBe(false);
   });
 
   it("moves a failed product back to queued for retry", () => {

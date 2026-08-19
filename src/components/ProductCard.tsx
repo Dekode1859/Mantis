@@ -24,6 +24,10 @@ function formatPrice(product: ProductRecord): string {
   }
 }
 
+function formatTimestamp(value: string): string {
+  return new Date(value).toLocaleString();
+}
+
 export function ProductCard({
   product,
   isDeleting,
@@ -85,8 +89,18 @@ export function ProductCard({
           </button>
         </div>
         <p className="product-card__meta">
-          Added {new Date(product.addedAt).toLocaleString()}
+          Added {formatTimestamp(product.addedAt)}
         </p>
+        {product.lastExtractedAt && (
+          <p className="product-card__meta">
+            Last extracted {formatTimestamp(product.lastExtractedAt)}
+          </p>
+        )}
+        {product.status === "failed" && product.lastAttemptedAt && (
+          <p className="product-card__meta">
+            Latest attempt failed {formatTimestamp(product.lastAttemptedAt)}
+          </p>
+        )}
       </div>
     </article>
   );

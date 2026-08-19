@@ -30,6 +30,10 @@ function formatScanMethod(scan: ProductScan): string {
   return scan.method === "deterministic" ? "Stored configuration" : "LLM discovery";
 }
 
+function formatTimestamp(value: string): string {
+  return new Date(value).toLocaleString();
+}
+
 function browserStorage(): Storage | undefined {
   return typeof window === "undefined" ? undefined : window.localStorage;
 }
@@ -115,6 +119,15 @@ export function ProductDetail({ product, onBack }: ProductDetailProps) {
           <span className="eyebrow">Current price</span>
           <strong>{formatPrice(product.price, product.currency)}</strong>
         </div>
+      </div>
+
+      <div className="product-detail__timing">
+        <span>
+          Last extracted {product.lastExtractedAt ? formatTimestamp(product.lastExtractedAt) : "Never"}
+        </span>
+        <span>
+          Latest attempt {product.lastAttemptedAt ? formatTimestamp(product.lastAttemptedAt) : "Not recorded"}
+        </span>
       </div>
 
       {product.status === "failed" && (

@@ -60,6 +60,8 @@ export const ProductRecordSchema = z.object({
   asin: z.string().min(1).nullable().default(null),
   seller: z.string().min(1).nullable().default(null),
   extractionError: z.string().min(1).nullable().default(null),
+  lastExtractedAt: DatabaseTimestampSchema.nullable().default(null),
+  lastAttemptedAt: DatabaseTimestampSchema.nullable().default(null),
   addedAt: z.string().datetime(),
 });
 
@@ -135,6 +137,8 @@ export function createQueuedProduct(input: string, addedAt = new Date()): Produc
     asin: null,
     seller: null,
     extractionError: null,
+    lastExtractedAt: null,
+    lastAttemptedAt: addedAt.toISOString(),
     addedAt: addedAt.toISOString(),
   });
 }
@@ -144,6 +148,7 @@ export function markProductReady(
   productId: string,
   result: ExtractionResult,
 ): ProductRecord[] {
+  const extractedAt = new Date().toISOString();
   return products.map((product) =>
     product.id === productId
       ? ProductRecordSchema.parse({
@@ -155,6 +160,8 @@ export function markProductReady(
           asin: result.asin,
           seller: result.seller,
           extractionError: null,
+          lastExtractedAt: extractedAt,
+          lastAttemptedAt: extractedAt,
         })
       : product,
   );
@@ -164,12 +171,14 @@ export function markProductQueued(
   products: ProductRecord[],
   productId: string,
 ): ProductRecord[] {
+  const attemptedAt = new Date().toISOString();
   return products.map((product) =>
     product.id === productId
       ? ProductRecordSchema.parse({
           ...product,
           status: "queued",
           extractionError: null,
+          lastAttemptedAt: attemptedAt,
         })
       : product,
   );
@@ -180,9 +189,15 @@ export function markProductFailed(
   productId: string,
   message: string,
 ): ProductRecord[] {
+  const attemptedAt = new Date().toISOString();
   return products.map((product) =>
     product.id === productId
-      ? ProductRecordSchema.parse({ ...product, status: "failed", extractionError: message })
+      ? ProductRecordSchema.parse({
+          ...product,
+          status: "failed",
+          extractionError: message,
+          lastAttemptedAt: attemptedAt,
+        })
       : product,
   );
 }

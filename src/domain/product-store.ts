@@ -2,6 +2,8 @@ import { ProductRecordSchema, type ProductRecord } from "./product";
 
 const storageKey = "mantis.products.v1";
 const cacheTimestampKey = "mantis.products.cache-timestamp.v1";
+const cacheVersionKey = "mantis.products.cache-version";
+const cacheVersion = "2";
 
 export const productCacheTtlMs = 30 * 60_000;
 
@@ -44,6 +46,7 @@ export function markProductsCached(
 ): void {
   if (!storage) return;
   storage.setItem(cacheTimestampKey, String(cachedAt));
+  storage.setItem(cacheVersionKey, cacheVersion);
 }
 
 export function isProductCacheFresh(
@@ -52,8 +55,10 @@ export function isProductCacheFresh(
   maxAgeMs = productCacheTtlMs,
 ): boolean {
   const cachedAt = loadProductsCachedAt(storage);
+  if (storage?.getItem(cacheVersionKey) !== cacheVersion) return false;
   return cachedAt !== undefined && cachedAt <= now && now - cachedAt < maxAgeMs;
 }
 
 export const productStorageKey = storageKey;
 export const productCacheTimestampKey = cacheTimestampKey;
+export const productCacheVersionKey = cacheVersionKey;

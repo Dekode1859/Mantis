@@ -172,6 +172,8 @@ describe("product persistence", () => {
             seller_name: "Example seller",
             extraction_error: null,
             added_at: "2026-08-19 00:00:00+00",
+            last_extracted_at: "2026-08-19 00:05:00+00",
+            updated_at: "2026-08-19 00:05:00+00",
           },
         ]),
         { status: 200 },
@@ -190,12 +192,14 @@ describe("product persistence", () => {
         sourceUrl: "https://www.amazon.in/dp/B0GD6QSD4M",
         price: 3499,
         currency: "INR",
+        lastExtractedAt: "2026-08-19T00:05:00.000Z",
+        lastAttemptedAt: "2026-08-19T00:05:00.000Z",
         addedAt: "2026-08-19T00:00:00.000Z",
       }),
     ]);
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "https://example.supabase.co/rest/v1/products?select=id,source_url,site,status,title,price,currency,external_product_id,seller_name,extraction_error,added_at&order=added_at.desc",
+      "https://example.supabase.co/rest/v1/products?select=id,source_url,site,status,title,price,currency,external_product_id,seller_name,extraction_error,added_at,last_extracted_at,updated_at&order=added_at.desc",
       expect.objectContaining({
         headers: expect.objectContaining({
           apikey: "server-only-test-key",

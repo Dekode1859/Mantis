@@ -31,9 +31,11 @@ const ProductRowSchema = z.object({
   seller_name: z.string().nullable(),
   extraction_error: z.string().nullable(),
   added_at: z.string().min(1),
+  last_extracted_at: z.string().nullable().optional(),
+  updated_at: z.string().nullable().optional(),
 });
 
-export const PRODUCTS_CACHE_KEY = "https://mantis-preview.internal/api/products";
+export const PRODUCTS_CACHE_KEY = "https://mantis-preview.internal/api/products?version=2";
 export const PRODUCTS_CACHE_CONTROL = "public, max-age=1800, stale-while-revalidate=300";
 export const PRODUCT_SCANS_CACHE_CONTROL = "public, max-age=30, stale-while-revalidate=60";
 
@@ -63,6 +65,10 @@ function productFromRow(value: unknown): ProductRecord {
     asin: row.external_product_id,
     seller: row.seller_name,
     extractionError: row.extraction_error,
+    lastExtractedAt: row.last_extracted_at ? timestampToIso(row.last_extracted_at) : null,
+    lastAttemptedAt: row.updated_at
+      ? timestampToIso(row.updated_at)
+      : timestampToIso(row.added_at),
     addedAt: timestampToIso(row.added_at),
   });
 }
@@ -170,7 +176,7 @@ export async function listProducts(
 
   const endpoint =
     `${config.url}/rest/v1/products?select=` +
-    "id,source_url,site,status,title,price,currency,external_product_id,seller_name,extraction_error,added_at" +
+    "id,source_url,site,status,title,price,currency,external_product_id,seller_name,extraction_error,added_at,last_extracted_at,updated_at" +
     "&order=added_at.desc";
   const response = await fetch(endpoint, {
     headers: {

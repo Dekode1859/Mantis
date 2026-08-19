@@ -455,6 +455,15 @@ button:hover {
   text-align: right;
 }
 
+.product-detail__timing {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  margin-top: 12px;
+  color: #9ea39c;
+  font-size: 0.75rem;
+}
+
 .product-detail__error,
 .scan-row__error {
   color: #ff9d8d;
