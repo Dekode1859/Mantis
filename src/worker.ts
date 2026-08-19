@@ -24,12 +24,34 @@ export interface Env {
   SUPABASE_SERVICE_ROLE_KEY?: string;
 }
 
-function isExtractRequest(value: unknown): value is { url: string } {
+export type ExtractionTrigger = "add" | "retry" | "scheduled" | "manual";
+type ExtractionMethod = "deterministic" | "llm";
+
+interface ExtractRequest {
+  url: string;
+  trigger: ExtractionTrigger;
+}
+
+interface ExtractionRoute {
+  extraction: ExtractionResult;
+  configurationId: string | null;
+  configurationVersion: number | null;
+  configurationSource: "llm" | "manual" | null;
+  method: ExtractionMethod;
+  model: string | null;
+}
+
+function isExtractionTrigger(value: unknown): value is ExtractionTrigger {
+  return value === "add" || value === "retry" || value === "scheduled" || value === "manual";
+}
+
+function isExtractRequest(value: unknown): value is ExtractRequest {
   return (
     typeof value === "object" &&
     value !== null &&
     "url" in value &&
-    typeof value.url === "string"
+    typeof value.url === "string" &&
+    (!("trigger" in value) || isExtractionTrigger(value.trigger))
   );
 }
 
@@ -44,14 +66,47 @@ function safeErrorMessage(error: unknown): string {
   return message;
 }
 
+function logExtractionAttempt(input: {
+  sourceUrl: string;
+  site: string;
+  trigger: ExtractionTrigger;
+  method: ExtractionMethod;
+  status: "ready" | "failed";
+  durationMs: number;
+  model: string | null;
+  configurationId: string | null;
+  configurationVersion: number | null;
+  configurationSource: "llm" | "manual" | null;
+  error?: string;
+}) {
+  console.log({
+    event: "product_extraction_attempt",
+    timestamp: new Date().toISOString(),
+    source_url: input.sourceUrl,
+    site: input.site,
+    trigger: input.trigger,
+    actor: input.trigger === "scheduled" ? "scheduler" : "user",
+    method: input.method,
+    status: input.status,
+    duration_ms: input.durationMs,
+    model: input.model,
+    configuration_id: input.configurationId,
+    configuration_version: input.configurationVersion,
+    configuration_source: input.configurationSource,
+    ...(input.error ? { error: input.error } : {}),
+  });
+}
+
 export async function extractWithStoredConfigurations(
   env: Env,
   sourceUrl: string,
-): Promise<{ extraction: ExtractionResult; configurationId: string | null }> {
+  trigger: ExtractionTrigger = "manual",
+): Promise<ExtractionRoute> {
   const site = new URL(sourceUrl).hostname.replace(/^www\./, "");
   const configurations = await listScraperConfigurations(env, site);
 
   for (const configuration of configurations) {
+    const startedAt = Date.now();
     try {
       const extraction = ExtractionResultSchema.parse(
         await env.SCRAPER.extract_product({
@@ -59,15 +114,66 @@ export async function extractWithStoredConfigurations(
           selectors: configuration.selectors,
         }),
       );
-      return { extraction, configurationId: configuration.id };
-    } catch {
-      // A configuration is only reused when its deterministic extraction validates.
+      logExtractionAttempt({
+        sourceUrl,
+        site,
+        trigger,
+        method: "deterministic",
+        status: "ready",
+        durationMs: Date.now() - startedAt,
+        model: configuration.model,
+        configurationId: configuration.id,
+        configurationVersion: configuration.version,
+        configurationSource: configuration.source,
+      });
+      return {
+        extraction,
+        configurationId: configuration.id,
+        configurationVersion: configuration.version,
+        configurationSource: configuration.source,
+        method: "deterministic",
+        model: configuration.model,
+      };
+    } catch (error) {
+      logExtractionAttempt({
+        sourceUrl,
+        site,
+        trigger,
+        method: "deterministic",
+        status: "failed",
+        durationMs: Date.now() - startedAt,
+        model: configuration.model,
+        configurationId: configuration.id,
+        configurationVersion: configuration.version,
+        configurationSource: configuration.source,
+        error: safeErrorMessage(error),
+      });
     }
   }
 
-  const extraction = ExtractionResultSchema.parse(
-    await env.SCRAPER.extract_product({ url: sourceUrl }),
-  );
+  const startedAt = Date.now();
+  let extraction: ExtractionResult;
+  try {
+    extraction = ExtractionResultSchema.parse(
+      await env.SCRAPER.extract_product({ url: sourceUrl }),
+    );
+  } catch (error) {
+    logExtractionAttempt({
+      sourceUrl,
+      site,
+      trigger,
+      method: "llm",
+      status: "failed",
+      durationMs: Date.now() - startedAt,
+      model: null,
+      configurationId: null,
+      configurationVersion: null,
+      configurationSource: null,
+      error: safeErrorMessage(error),
+    });
+    throw error;
+  }
+
   const configuration = await saveScraperConfiguration(
     env,
     site,
@@ -75,7 +181,26 @@ export async function extractWithStoredConfigurations(
     sourceUrl,
     configurations,
   );
-  return { extraction, configurationId: configuration?.id ?? null };
+  logExtractionAttempt({
+    sourceUrl,
+    site,
+    trigger,
+    method: "llm",
+    status: "ready",
+    durationMs: Date.now() - startedAt,
+    model: extraction.model ?? null,
+    configurationId: configuration?.id ?? null,
+    configurationVersion: configuration?.version ?? null,
+    configurationSource: configuration?.source ?? null,
+  });
+  return {
+    extraction,
+    configurationId: configuration?.id ?? null,
+    configurationVersion: configuration?.version ?? null,
+    configurationSource: configuration?.source ?? null,
+    method: "llm",
+    model: extraction.model ?? null,
+  };
 }
 
 export default {
@@ -98,10 +223,11 @@ export default {
         }
 
         const sourceUrl = normalizeProductUrl(payload.url).toString();
+        const trigger = payload.trigger ?? "manual";
         await upsertProduct(env, queuedProduct(sourceUrl));
 
         try {
-          const result = await extractWithStoredConfigurations(env, sourceUrl);
+          const result = await extractWithStoredConfigurations(env, sourceUrl, trigger);
           await upsertProduct(
             env,
             readyProduct(sourceUrl, result.extraction, result.configurationId),

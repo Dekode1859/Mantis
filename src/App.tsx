@@ -29,12 +29,12 @@ export default function App() {
     saveProducts(browserStorage(), products);
   }, [products]);
 
-  async function extractProduct(product: ProductRecord) {
+  async function extractProduct(product: ProductRecord, trigger: "add" | "retry") {
     try {
       const response = await fetch("/api/extract", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: product.sourceUrl }),
+        body: JSON.stringify({ url: product.sourceUrl, trigger }),
       });
       const payload: unknown = await response.json();
       if (!response.ok) {
@@ -77,7 +77,7 @@ export default function App() {
     setFeedback("Product added. Extracting product details...");
 
     try {
-      await extractProduct(result.product);
+      await extractProduct(result.product, "add");
     } finally {
       setIsSubmitting(false);
     }
@@ -92,7 +92,7 @@ export default function App() {
     setFeedback("Retrying product extraction...");
 
     try {
-      await extractProduct(product);
+      await extractProduct(product, "retry");
     } finally {
       setRetryingProductId(undefined);
       setIsSubmitting(false);
