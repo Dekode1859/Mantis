@@ -34,7 +34,7 @@ const ProductRowSchema = z.object({
 });
 
 export const PRODUCTS_CACHE_KEY = "https://mantis-preview.internal/api/products";
-export const PRODUCTS_CACHE_CONTROL = "public, max-age=30, stale-while-revalidate=60";
+export const PRODUCTS_CACHE_CONTROL = "public, max-age=1800, stale-while-revalidate=300";
 export const PRODUCT_SCANS_CACHE_CONTROL = "public, max-age=30, stale-while-revalidate=60";
 
 function siteFromUrl(sourceUrl: string): string {

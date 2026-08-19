@@ -3,7 +3,7 @@ import { ProductRecordSchema, type ProductRecord } from "./product";
 const storageKey = "mantis.products.v1";
 const cacheTimestampKey = "mantis.products.cache-timestamp.v1";
 
-export const productCacheTtlMs = 60_000;
+export const productCacheTtlMs = 30 * 60_000;
 
 export type ProductStorage = Pick<Storage, "getItem" | "setItem">;
 

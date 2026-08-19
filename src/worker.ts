@@ -27,15 +27,24 @@ import {
 
 export interface Env {
   ASSETS: Fetcher;
-  SCRAPER: {
-    extract_product(payload: { url: string; selectors?: unknown }): Promise<unknown>;
-  };
+  SCRAPER?: ScraperBinding;
+  REFRESH_QUEUE?: Queue<RefreshQueueMessage>;
+  SCRAPER_URL?: string;
   SUPABASE_URL?: string;
   SUPABASE_SERVICE_ROLE_KEY?: string;
 }
 
 export type ExtractionTrigger = "add" | "retry" | "scheduled" | "manual";
 type ExtractionMethod = "deterministic" | "llm";
+
+interface ScraperBinding {
+  fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
+}
+
+export interface RefreshQueueMessage {
+  sourceUrl: string;
+  scheduledAt: string;
+}
 
 interface ExtractRequest {
   url: string;
@@ -50,6 +59,17 @@ interface ExtractionRoute {
   method: ExtractionMethod;
   model: string | null;
   durationMs: number;
+}
+
+type ProductExtractionProcess =
+  | { ok: true; result: ExtractionRoute }
+  | { ok: false; error: string };
+
+export interface ScheduledRefreshSummary {
+  scheduledAt: string;
+  productCount: number;
+  succeeded: number;
+  failed: number;
 }
 
 interface ScraperFailure {
@@ -115,6 +135,28 @@ function parseScraperResult(value: unknown): ExtractionResult {
   return ExtractionResultSchema.parse(value);
 }
 
+async function callScraper(
+  env: Env,
+  payload: { url: string; selectors?: unknown },
+): Promise<unknown> {
+  const endpoint = env.SCRAPER_URL
+    ? new URL("/api/extract", env.SCRAPER_URL).toString()
+    : "https://mantis-scraper/api/extract";
+  const response = env.SCRAPER_URL
+    ? await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+    : await env.SCRAPER?.fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+  if (!response) throw new Error("The scraper service is not configured.");
+  return response.json();
+}
+
 function logExtractionAttempt(input: {
   sourceUrl: string;
   site: string;
@@ -163,7 +205,7 @@ export async function extractWithStoredConfigurations(
     const startedAt = Date.now();
     try {
       const extraction = parseScraperResult(
-        await env.SCRAPER.extract_product({
+        await callScraper(env, {
           url: sourceUrl,
           selectors: configuration.selectors,
         }),
@@ -209,11 +251,18 @@ export async function extractWithStoredConfigurations(
     }
   }
 
+  if (trigger === "scheduled") {
+    const message = deterministicFailures.length
+      ? `Deterministic configurations failed: ${deterministicFailures.join("; ")}.`
+      : "No deterministic scraper configuration is available for scheduled refresh.";
+    throw new Error(message);
+  }
+
   const startedAt = Date.now();
   let extraction: ExtractionResult;
   try {
     extraction = parseScraperResult(
-      await env.SCRAPER.extract_product({ url: sourceUrl }),
+      await callScraper(env, { url: sourceUrl }),
     );
   } catch (error) {
     logExtractionAttempt({
@@ -265,6 +314,161 @@ export async function extractWithStoredConfigurations(
   };
 }
 
+async function processProductExtraction(
+  env: Env,
+  sourceUrl: string,
+  trigger: ExtractionTrigger,
+): Promise<ProductExtractionProcess> {
+  const scanStartedAt = Date.now();
+  await upsertProduct(env, queuedProduct(sourceUrl));
+
+  try {
+    const result = await extractWithStoredConfigurations(env, sourceUrl, trigger);
+    await upsertProduct(
+      env,
+      readyProduct(sourceUrl, result.extraction, result.configurationId),
+    );
+    await insertProductScan(env, {
+      sourceUrl,
+      scraperConfigurationId: result.configurationId,
+      method: result.method,
+      trigger,
+      actor: actorForTrigger(trigger),
+      status: "ready",
+      extraction: result.extraction,
+      model: result.model,
+      durationMs: result.durationMs,
+      extractionError: null,
+    });
+    return { ok: true, result };
+  } catch (error) {
+    const message = safeErrorMessage(error);
+    await upsertProduct(env, failedProduct(sourceUrl, message));
+    await insertProductScan(env, {
+      sourceUrl,
+      scraperConfigurationId: null,
+      method: trigger === "scheduled" ? "deterministic" : "llm",
+      trigger,
+      actor: actorForTrigger(trigger),
+      status: "failed",
+      extraction: null,
+      model: null,
+      durationMs: Date.now() - scanStartedAt,
+      extractionError: message,
+    });
+    return { ok: false, error: message };
+  }
+}
+
+export async function runScheduledRefresh(
+  env: Env,
+  scheduledAt = new Date(),
+): Promise<ScheduledRefreshSummary> {
+  const products = await listProducts(env);
+  const scheduledAtIso = scheduledAt.toISOString();
+  if (!products) {
+    const summary = {
+      scheduledAt: scheduledAtIso,
+      productCount: 0,
+      succeeded: 0,
+      failed: 0,
+    };
+    console.log({ event: "scheduled_refresh", status: "skipped", ...summary });
+    return summary;
+  }
+
+  let succeeded = 0;
+  let failed = 0;
+  for (const product of products) {
+    try {
+      const result = await processProductExtraction(env, product.sourceUrl, "scheduled");
+      if (result.ok) {
+        succeeded += 1;
+      } else {
+        failed += 1;
+      }
+      console.log({
+        event: "scheduled_product_refresh",
+        scheduled_at: scheduledAtIso,
+        source_url: product.sourceUrl,
+        status: result.ok ? "ready" : "failed",
+        ...(result.ok ? {} : { error: result.error }),
+      });
+    } catch (error) {
+      failed += 1;
+      console.log({
+        event: "scheduled_product_refresh",
+        scheduled_at: scheduledAtIso,
+        source_url: product.sourceUrl,
+        status: "failed",
+        error: safeErrorMessage(error),
+      });
+    }
+  }
+
+  const summary = {
+    scheduledAt: scheduledAtIso,
+    productCount: products.length,
+    succeeded,
+    failed,
+  };
+  console.log({ event: "scheduled_refresh", status: "completed", ...summary });
+  return summary;
+}
+
+export async function enqueueScheduledRefresh(
+  env: Env,
+  scheduledAt = new Date(),
+): Promise<ScheduledRefreshSummary> {
+  const products = await listProducts(env);
+  const scheduledAtIso = scheduledAt.toISOString();
+  if (!products) {
+    const summary = {
+      scheduledAt: scheduledAtIso,
+      productCount: 0,
+      succeeded: 0,
+      failed: 0,
+    };
+    console.log({ event: "scheduled_refresh", status: "skipped", ...summary });
+    return summary;
+  }
+
+  if (!env.REFRESH_QUEUE) return runScheduledRefresh(env, scheduledAt);
+
+  await env.REFRESH_QUEUE.sendBatch(
+    products.map((product) => ({
+      body: {
+        sourceUrl: product.sourceUrl,
+        scheduledAt: scheduledAtIso,
+      },
+    })),
+  );
+
+  const summary = {
+    scheduledAt: scheduledAtIso,
+    productCount: products.length,
+    succeeded: 0,
+    failed: 0,
+  };
+  console.log({
+    event: "scheduled_refresh",
+    status: "queued",
+    ...summary,
+  });
+  return summary;
+}
+
+function isRefreshQueueMessage(value: unknown): value is RefreshQueueMessage {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "sourceUrl" in value &&
+    typeof value.sourceUrl === "string" &&
+    "scheduledAt" in value &&
+    typeof value.scheduledAt === "string"
+  );
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -286,45 +490,10 @@ export default {
 
         const sourceUrl = normalizeProductUrl(payload.url).toString();
         const trigger = payload.trigger ?? "manual";
-        const scanStartedAt = Date.now();
-        await upsertProduct(env, queuedProduct(sourceUrl));
-
-        try {
-          const result = await extractWithStoredConfigurations(env, sourceUrl, trigger);
-          await upsertProduct(
-            env,
-            readyProduct(sourceUrl, result.extraction, result.configurationId),
-          );
-          await insertProductScan(env, {
-            sourceUrl,
-            scraperConfigurationId: result.configurationId,
-            method: result.method,
-            trigger,
-            actor: actorForTrigger(trigger),
-            status: "ready",
-            extraction: result.extraction,
-            model: result.model,
-            durationMs: result.durationMs,
-            extractionError: null,
-          });
-          return Response.json(result.extraction);
-        } catch (error) {
-          const message = safeErrorMessage(error);
-          await upsertProduct(env, failedProduct(sourceUrl, message));
-          await insertProductScan(env, {
-            sourceUrl,
-            scraperConfigurationId: null,
-            method: "llm",
-            trigger,
-            actor: actorForTrigger(trigger),
-            status: "failed",
-            extraction: null,
-            model: null,
-            durationMs: Date.now() - scanStartedAt,
-            extractionError: message,
-          });
-          return Response.json({ error: message }, { status: 502 });
-        }
+        const result = await processProductExtraction(env, sourceUrl, trigger);
+        return result.ok
+          ? Response.json(result.result.extraction)
+          : Response.json({ error: result.error }, { status: 502 });
       } catch (error) {
         return Response.json({ error: safeErrorMessage(error) }, { status: 502 });
       }
@@ -436,4 +605,45 @@ export default {
 
     return env.ASSETS.fetch(request);
   },
-} satisfies ExportedHandler<Env>;
+
+  async scheduled(controller: ScheduledController, env: Env): Promise<void> {
+    try {
+      await enqueueScheduledRefresh(env, new Date(controller.scheduledTime));
+    } catch (error) {
+      console.log({
+        event: "scheduled_refresh",
+        status: "failed",
+        scheduled_at: new Date(controller.scheduledTime).toISOString(),
+        error: safeErrorMessage(error),
+      });
+    }
+  },
+
+  async queue(batch: MessageBatch<RefreshQueueMessage>, env: Env): Promise<void> {
+    for (const message of batch.messages) {
+      if (!isRefreshQueueMessage(message.body)) {
+        console.log({
+          event: "scheduled_product_refresh",
+          status: "failed",
+          error: "Invalid refresh queue message",
+        });
+        message.ack();
+        continue;
+      }
+
+      const result = await processProductExtraction(
+        env,
+        message.body.sourceUrl,
+        "scheduled",
+      );
+      console.log({
+        event: "scheduled_product_refresh",
+        scheduled_at: message.body.scheduledAt,
+        source_url: message.body.sourceUrl,
+        status: result.ok ? "ready" : "failed",
+        ...(result.ok ? {} : { error: result.error }),
+      });
+      message.ack();
+    }
+  },
+} satisfies ExportedHandler<Env, RefreshQueueMessage>;

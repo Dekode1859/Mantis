@@ -3,6 +3,9 @@
   "name": "mantis-preview",
   "main": "src/worker.ts",
   "compatibility_date": "2026-08-18",
+  "compatibility_flags": [
+    "global_fetch_strictly_public"
+  ],
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
@@ -15,6 +18,30 @@
       "service": "mantis-scraper-preview"
     }
   ],
+  "vars": {
+    "SCRAPER_URL": "https://mantis-scraper-preview.prateekdwivedi30.workers.dev"
+  },
+  "queues": {
+    "producers": [
+      {
+        "binding": "REFRESH_QUEUE",
+        "queue": "mantis-refresh-preview"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "mantis-refresh-preview",
+        "max_batch_size": 1,
+        "max_batch_timeout": 0,
+        "max_retries": 3,
+        "max_concurrency": 1,
+        "retry_delay": 60
+      }
+    ]
+  },
+  "triggers": {
+    "crons": ["0 */3 * * *"]
+  },
   "observability": {
     "enabled": true
   }

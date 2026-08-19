@@ -10,6 +10,7 @@ import {
   isProductCacheFresh,
   loadProducts,
   markProductsCached,
+  productCacheTtlMs,
   productCacheTimestampKey,
   productStorageKey,
   saveProducts,
@@ -81,8 +82,8 @@ describe("product link flow", () => {
     markProductsCached(storage, 10_000);
 
     expect(values.get(productCacheTimestampKey)).toBe("10000");
-    expect(isProductCacheFresh(storage, 10_000 + 59_999)).toBe(true);
-    expect(isProductCacheFresh(storage, 10_000 + 60_000)).toBe(false);
+    expect(isProductCacheFresh(storage, 10_000 + productCacheTtlMs - 1)).toBe(true);
+    expect(isProductCacheFresh(storage, 10_000 + productCacheTtlMs)).toBe(false);
   });
 
   it("moves a failed product back to queued for retry", () => {
