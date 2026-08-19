@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 
 import { ProductCard } from "./components/ProductCard";
+import { ProductDetail } from "./components/ProductDetail";
 import {
   addProduct,
   ExtractionResultSchema,
@@ -16,9 +17,22 @@ import {
   markProductsCached,
   saveProducts,
 } from "./domain/product-store";
+import { clearProductScanCache } from "./domain/scan-store";
 
 function browserStorage(): Storage | undefined {
   return typeof window === "undefined" ? undefined : window.localStorage;
+}
+
+function productIdFromPath(): string | undefined {
+  if (typeof window === "undefined") return undefined;
+  const match = window.location.pathname.match(/^\/products\/([^/]+)$/);
+  if (!match) return undefined;
+
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return undefined;
+  }
 }
 
 export default function App() {
@@ -30,6 +44,9 @@ export default function App() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [deletingProductId, setDeletingProductId] = useState<string | undefined>();
   const [retryingProductId, setRetryingProductId] = useState<string | undefined>();
+  const [selectedProductId, setSelectedProductId] = useState<string | undefined>(() =>
+    productIdFromPath(),
+  );
   const hasLocalChanges = useRef(false);
 
   useEffect(() => {
@@ -71,6 +88,22 @@ export default function App() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    const handlePopState = () => setSelectedProductId(productIdFromPath());
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+  function openProduct(product: ProductRecord) {
+    window.history.pushState({}, "", `/products/${encodeURIComponent(product.id)}`);
+    setSelectedProductId(product.id);
+  }
+
+  function closeProduct() {
+    window.history.pushState({}, "", "/");
+    setSelectedProductId(undefined);
+  }
 
   async function extractProduct(product: ProductRecord, trigger: "add" | "retry") {
     try {
@@ -163,6 +196,7 @@ export default function App() {
       }
 
       setProducts((current) => current.filter((item) => item.id !== product.id));
+      clearProductScanCache(browserStorage(), product.id);
       hasLocalChanges.current = true;
       setFeedback("Product deleted.");
     } catch (error) {
@@ -170,6 +204,30 @@ export default function App() {
     } finally {
       setDeletingProductId(undefined);
     }
+  }
+
+  if (selectedProductId) {
+    return (
+      <main className="shell">
+        <header className="topbar">
+          <a
+            className="wordmark"
+            href="/"
+            onClick={(event) => {
+              event.preventDefault();
+              closeProduct();
+            }}
+          >
+            Mantis
+          </a>
+          <span className="topbar__note">Product details</span>
+        </header>
+        <ProductDetail
+          product={products.find((item) => item.id === selectedProductId)}
+          onBack={closeProduct}
+        />
+      </main>
+    );
   }
 
   return (
@@ -235,6 +293,7 @@ export default function App() {
                 isRetrying={retryingProductId === product.id}
                 onDelete={handleDelete}
                 onRetry={handleRetry}
+                onView={openProduct}
               />
             ))}
           </div>

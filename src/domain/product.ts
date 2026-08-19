@@ -65,6 +65,25 @@ export const ProductRecordSchema = z.object({
 
 export type ProductRecord = z.infer<typeof ProductRecordSchema>;
 
+export const ProductScanSchema = z.object({
+  id: z.string().uuid(),
+  productId: z.string().uuid(),
+  scraperConfigurationId: z.string().uuid().nullable(),
+  method: z.enum(["deterministic", "llm"]),
+  trigger: z.enum(["add", "retry", "scheduled", "manual"]),
+  actor: z.enum(["user", "scheduler", "system"]),
+  status: z.enum(["ready", "failed"]),
+  title: z.string().min(1).nullable(),
+  price: PriceSchema.default(null),
+  currency: CurrencyCodeSchema.nullable().default(null),
+  model: z.string().min(1).nullable(),
+  durationMs: z.number().int().nonnegative(),
+  extractionError: z.string().min(1).nullable(),
+  scannedAt: z.string().datetime(),
+});
+
+export type ProductScan = z.infer<typeof ProductScanSchema>;
+
 export const ExtractionResultSchema = z.object({
   status: z.literal("ready"),
   source_url: z.string().url(),

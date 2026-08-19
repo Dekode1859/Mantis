@@ -208,4 +208,52 @@ describe("product API", () => {
       }),
     ]);
   });
+
+  it("loads scan history only through the explicit history endpoint", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify([
+            {
+              id: "33333333-3333-4333-8333-333333333333",
+              product_id: "11111111-1111-4111-8111-111111111111",
+              scraper_configuration_id: null,
+              extraction_method: "llm",
+              trigger: "add",
+              actor: "user",
+              status: "ready",
+              title: "Example item",
+              price: 100,
+              currency: "INR",
+              model: "gpt-oss:120b",
+              duration_ms: 500,
+              extraction_error: null,
+              scanned_at: "2026-08-19T00:00:00.000Z",
+            },
+          ]),
+          { status: 200 },
+        ),
+      ),
+    );
+
+    const response = await worker.fetch(
+      new Request(
+        "https://mantis-preview.example/api/products/11111111-1111-4111-8111-111111111111/scans",
+      ),
+      {
+        ...envBase,
+        SCRAPER: { extract_product: vi.fn() },
+      } as Env,
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual([
+      expect.objectContaining({
+        method: "llm",
+        trigger: "add",
+        durationMs: 500,
+      }),
+    ]);
+  });
 });

@@ -7,8 +7,10 @@ import {
   deleteProduct,
   failedProduct,
   listProducts,
+  productScansCacheKey,
   PRODUCTS_CACHE_CONTROL,
   PRODUCTS_CACHE_KEY,
+  PRODUCT_SCANS_CACHE_CONTROL,
   queuedProduct,
   readyProduct,
   upsertProduct,
@@ -17,7 +19,11 @@ import {
   listScraperConfigurations,
   saveScraperConfiguration,
 } from "./server/scrapers";
-import { insertProductScan } from "./server/scans";
+import {
+  isProductId,
+  listProductScans,
+  insertProductScan,
+} from "./server/scans";
 
 export interface Env {
   ASSETS: Fetcher;
@@ -373,6 +379,56 @@ export default {
         const sourceUrl = normalizeProductUrl(sourceUrlInput).toString();
         await deleteProduct(env, sourceUrl);
         return Response.json({ deleted: true });
+      } catch (error) {
+        return Response.json({ error: safeErrorMessage(error) }, { status: 502 });
+      }
+    }
+
+    const scansMatch = url.pathname.match(/^\/api\/products\/([^/]+)\/scans$/);
+    if (scansMatch) {
+      if (request.method !== "GET") {
+        return Response.json({ error: "Method not allowed" }, { status: 405 });
+      }
+
+      let productId: string;
+      try {
+        productId = decodeURIComponent(scansMatch[1]);
+      } catch {
+        return Response.json({ error: "A valid product ID is required" }, { status: 400 });
+      }
+      if (!isProductId(productId)) {
+        return Response.json({ error: "A valid product ID is required" }, { status: 400 });
+      }
+
+      try {
+        const cacheKey = new Request(productScansCacheKey(productId));
+        const cache =
+          typeof caches === "undefined"
+            ? undefined
+            : (caches as unknown as { default?: Cache }).default;
+        const cached = cache ? await cache.match(cacheKey) : undefined;
+        if (cached) return cached;
+
+        const scans = await listProductScans(env, productId);
+        if (!scans) {
+          return Response.json(
+            { error: "Supabase persistence is not configured." },
+            { status: 503 },
+          );
+        }
+
+        const response = Response.json(scans, {
+          headers: {
+            "Cache-Control": PRODUCT_SCANS_CACHE_CONTROL,
+            "X-Product-Scans-Source": "database",
+          },
+        });
+        if (cache) {
+          try {
+            await cache.put(cacheKey, response.clone());
+          } catch {}
+        }
+        return response;
       } catch (error) {
         return Response.json({ error: safeErrorMessage(error) }, { status: 502 });
       }

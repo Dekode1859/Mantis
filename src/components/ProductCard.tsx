@@ -6,6 +6,7 @@ type ProductCardProps = {
   isRetrying: boolean;
   onDelete: (product: ProductRecord) => void;
   onRetry: (product: ProductRecord) => void;
+  onView: (product: ProductRecord) => void;
 };
 
 function formatPrice(product: ProductRecord): string {
@@ -29,6 +30,7 @@ export function ProductCard({
   isRetrying,
   onDelete,
   onRetry,
+  onView,
 }: ProductCardProps) {
   return (
     <article className="product-card">
@@ -53,6 +55,13 @@ export function ProductCard({
           <p className="product-card__error">{product.extractionError ?? "Extraction failed."}</p>
         )}
         <div className="product-card__actions">
+          <button
+            className="product-card__view"
+            type="button"
+            onClick={() => onView(product)}
+          >
+            View details
+          </button>
           <a href={product.sourceUrl} target="_blank" rel="noreferrer">
             {product.sourceUrl}
           </a>

@@ -35,6 +35,7 @@ const ProductRowSchema = z.object({
 
 export const PRODUCTS_CACHE_KEY = "https://mantis-preview.internal/api/products";
 export const PRODUCTS_CACHE_CONTROL = "public, max-age=30, stale-while-revalidate=60";
+export const PRODUCT_SCANS_CACHE_CONTROL = "public, max-age=30, stale-while-revalidate=60";
 
 function siteFromUrl(sourceUrl: string): string {
   return new URL(sourceUrl).hostname.replace(/^www\./, "");
@@ -100,13 +101,30 @@ function responseMessage(body: string): string | undefined {
   return undefined;
 }
 
+function workerCache(): Cache | undefined {
+  if (typeof caches === "undefined") return undefined;
+  return (caches as unknown as { default?: Cache }).default;
+}
+
+export function productScansCacheKey(productId: string): string {
+  return `https://mantis-preview.internal/api/products/${encodeURIComponent(productId)}/scans`;
+}
+
 async function invalidateProductsCache(): Promise<void> {
-  if (typeof caches === "undefined") return;
-  const cache = (caches as unknown as { default?: Cache }).default;
+  const cache = workerCache();
   if (!cache) return;
 
   try {
     await cache.delete(new Request(PRODUCTS_CACHE_KEY));
+  } catch {}
+}
+
+export async function invalidateProductScansCache(productId: string): Promise<void> {
+  const cache = workerCache();
+  if (!cache) return;
+
+  try {
+    await cache.delete(new Request(productScansCacheKey(productId)));
   } catch {}
 }
 
