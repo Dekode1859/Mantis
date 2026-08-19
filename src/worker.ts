@@ -43,6 +43,12 @@ interface ExtractionRoute {
   durationMs: number;
 }
 
+interface ScraperFailure {
+  code?: unknown;
+  field?: unknown;
+  message?: unknown;
+}
+
 function isExtractionTrigger(value: unknown): value is ExtractionTrigger {
   return value === "add" || value === "retry" || value === "scheduled" || value === "manual";
 }
@@ -66,6 +72,38 @@ function safeErrorMessage(error: unknown): string {
     return "The scraper failed while evaluating the page.";
   }
   return message;
+}
+
+function scraperResultError(value: unknown): string | undefined {
+  if (typeof value !== "object" || value === null || !("status" in value)) {
+    return undefined;
+  }
+  if (value.status !== "failed") return undefined;
+  if (!("error" in value)) return "The scraper returned an invalid failure response.";
+
+  const details = value.error;
+  if (typeof details === "string") return details;
+  if (typeof details !== "object" || details === null) {
+    return "The scraper returned an invalid failure response.";
+  }
+
+  const failure = details as ScraperFailure;
+  if (typeof failure.message !== "string" || !failure.message.trim()) {
+    return "The scraper returned an invalid failure response.";
+  }
+  if (typeof failure.field === "string" && failure.field.trim()) {
+    const prefix = `${failure.field.trim()}:`;
+    return failure.message.startsWith(prefix)
+      ? failure.message
+      : `${prefix} ${failure.message}`;
+  }
+  return failure.message;
+}
+
+function parseScraperResult(value: unknown): ExtractionResult {
+  const failure = scraperResultError(value);
+  if (failure) throw new Error(failure);
+  return ExtractionResultSchema.parse(value);
 }
 
 function logExtractionAttempt(input: {
@@ -110,11 +148,12 @@ export async function extractWithStoredConfigurations(
 ): Promise<ExtractionRoute> {
   const site = new URL(sourceUrl).hostname.replace(/^www\./, "");
   const configurations = await listScraperConfigurations(env, site);
+  const deterministicFailures: string[] = [];
 
   for (const configuration of configurations) {
     const startedAt = Date.now();
     try {
-      const extraction = ExtractionResultSchema.parse(
+      const extraction = parseScraperResult(
         await env.SCRAPER.extract_product({
           url: sourceUrl,
           selectors: configuration.selectors,
@@ -155,13 +194,16 @@ export async function extractWithStoredConfigurations(
         configurationSource: configuration.source,
         error: safeErrorMessage(error),
       });
+      deterministicFailures.push(
+        `${configuration.id} (v${configuration.version}): ${safeErrorMessage(error)}`,
+      );
     }
   }
 
   const startedAt = Date.now();
   let extraction: ExtractionResult;
   try {
-    extraction = ExtractionResultSchema.parse(
+    extraction = parseScraperResult(
       await env.SCRAPER.extract_product({ url: sourceUrl }),
     );
   } catch (error) {
@@ -178,7 +220,10 @@ export async function extractWithStoredConfigurations(
       configurationSource: null,
       error: safeErrorMessage(error),
     });
-    throw error;
+    const deterministicMessage = deterministicFailures.length
+      ? ` Deterministic configurations failed: ${deterministicFailures.join("; ")}.`
+      : "";
+    throw new Error(`${safeErrorMessage(error)}${deterministicMessage}`);
   }
 
   const configuration = await saveScraperConfiguration(

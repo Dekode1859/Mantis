@@ -88,6 +88,45 @@ describe("stored scraper configuration selection", () => {
     );
   });
 
+  it("preserves a field-level deterministic failure before falling back", async () => {
+    const logMock = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const savedConfiguration = { ...configuration, id: "22222222-2222-4222-8222-222222222222" };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify([configuration]), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify([savedConfiguration]), { status: 201 }));
+    const scraper = {
+      extract_product: vi
+        .fn()
+        .mockResolvedValueOnce({
+          status: "failed",
+          error: {
+            code: "validation_error",
+            field: "price",
+            message: "price: selector matched no nodes",
+          },
+        })
+        .mockResolvedValueOnce(extraction),
+    };
+    vi.stubGlobal("fetch", fetchMock);
+
+    await extractWithStoredConfigurations(
+      { ...envBase, SCRAPER: scraper } as Env,
+      extraction.source_url,
+      "retry",
+    );
+
+    expect(logMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "product_extraction_attempt",
+        method: "deterministic",
+        status: "failed",
+        configuration_id: configuration.id,
+        error: "price: selector matched no nodes",
+      }),
+    );
+  });
+
   it("falls back to the LLM result and stores its configuration", async () => {
     const logMock = vi.spyOn(console, "log").mockImplementation(() => undefined);
     const savedConfiguration = { ...configuration, id: "22222222-2222-4222-8222-222222222222" };

@@ -64,17 +64,82 @@ def json_response(data: object, status: int = 200) -> Response:
     return Response.json(data, status=status)
 
 
-def model_html(html: str, max_chars: int = 260_000) -> str:
-    cleaned = re.sub(
-        r"<(script|style|noscript|template)\b[^>]*>.*?</\1>",
-        "",
-        html,
-        flags=re.IGNORECASE | re.DOTALL,
+REMOVABLE_HTML_BLOCKS = re.compile(
+    r"<(script|style|noscript|template|svg|canvas|picture|iframe)\b[^>]*>.*?</\1\s*>",
+    flags=re.IGNORECASE | re.DOTALL,
+)
+HTML_COMMENT = re.compile(r"<!--.*?-->", flags=re.DOTALL)
+HTML_CONTEXT_MARKERS = (
+    "producttitle",
+    "coreprice",
+    "a-offscreen",
+    "current-price",
+    "product-price",
+    "asin",
+    "seller",
+    "merchant",
+)
+
+
+def clean_html(html: str) -> str:
+    without_blocks = REMOVABLE_HTML_BLOCKS.sub("", html)
+    return HTML_COMMENT.sub("", without_blocks)
+
+
+def trim_html(cleaned_html: str, max_chars: int) -> str:
+    if len(cleaned_html) <= max_chars:
+        return cleaned_html
+
+    lowered = cleaned_html.lower()
+    windows: list[tuple[int, int]] = []
+    radius = 6_000
+    for marker in HTML_CONTEXT_MARKERS:
+        start = 0
+        occurrences = 0
+        while occurrences < 4:
+            position = lowered.find(marker, start)
+            if position < 0:
+                break
+            windows.append((max(0, position - radius), min(len(cleaned_html), position + radius)))
+            start = position + len(marker)
+            occurrences += 1
+
+    if not windows:
+        half = max_chars // 2
+        return cleaned_html[:half] + "\n<!-- content omitted -->\n" + cleaned_html[-half:]
+
+    windows.sort()
+    merged: list[list[int]] = []
+    for start, end in windows:
+        if merged and start <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], end)
+        else:
+            merged.append([start, end])
+
+    selected = "\n<!-- content omitted -->\n".join(
+        cleaned_html[start:end] for start, end in merged
     )
-    if len(cleaned) <= max_chars:
-        return cleaned
+    if len(selected) <= max_chars:
+        return selected
     half = max_chars // 2
-    return cleaned[:half] + "\n<!-- content omitted -->\n" + cleaned[-half:]
+    return selected[:half] + "\n<!-- content omitted -->\n" + selected[-half:]
+
+
+def model_html(html: str, max_chars: int = 120_000) -> str:
+    return trim_html(html, max_chars)
+
+
+def extraction_error(error: Exception) -> dict[str, str | None]:
+    message = str(error).strip() or error.__class__.__name__
+    field = next(
+        (candidate for candidate in ("title", "price", "asin", "seller") if message.startswith(f"{candidate}:")),
+        None,
+    )
+    return {
+        "code": "validation_error" if field else "extraction_error",
+        "field": field,
+        "message": message,
+    }
 
 
 def clean_model_json(content: str) -> dict[str, Any]:
@@ -180,33 +245,121 @@ def normalize_price(raw: str, default_currency: str | None = None) -> tuple[Deci
 
 
 SelectorToken = tuple[str | None, str | None, frozenset[str], str | None, str | None]
-SELECTOR_PATTERN = re.compile(
-    r"^(?:(?P<tag>[a-zA-Z][\w:-]*)|\*)?"
-    r"(?P<id>#[\w:-]+)?"
-    r"(?P<classes>(?:\.[\w:-]+)*)"
-    r"(?:\[(?P<attribute>[\w:-]+)(?:=(?P<value>[^\]]+))?\])?$"
-)
-CLASS_PATTERN = re.compile(r"\.[\w:-]+")
+
+
+def is_selector_name_char(value: str) -> bool:
+    return value.isalnum() or value in "_:-"
+
+
+def read_selector_name(token: str, start: int) -> tuple[str, int]:
+    index = start
+    while index < len(token) and is_selector_name_char(token[index]):
+        index += 1
+    if index == start:
+        raise ValueError(f"Unsupported CSS selector token: {token}")
+    return token[start:index], index
 
 
 def selector_token(token: str) -> SelectorToken:
-    match = SELECTOR_PATTERN.fullmatch(token)
-    if not match:
+    if not token or len(token) > 128:
         raise ValueError(f"Unsupported CSS selector token: {token}")
-    value = match.group("value")
-    if value is not None:
-        value = value.strip().strip("\"'")
-    return (
-        match.group("tag"),
-        match.group("id"),
-        frozenset(item[1:] for item in CLASS_PATTERN.findall(match.group("classes"))),
-        match.group("attribute"),
-        value,
-    )
+
+    index = 0
+    tag: str | None = None
+    wildcard = False
+    element_id: str | None = None
+    classes: set[str] = set()
+    attribute: str | None = None
+    expected: str | None = None
+
+    if token[index] == "*":
+        wildcard = True
+        index += 1
+    elif token[index].isalpha():
+        tag, index = read_selector_name(token, index)
+    elif token[index] not in "#.[":
+        raise ValueError(f"Unsupported CSS selector token: {token}")
+
+    if index < len(token) and token[index] == "#":
+        name, index = read_selector_name(token, index + 1)
+        element_id = f"#{name}"
+
+    while index < len(token) and token[index] == ".":
+        name, index = read_selector_name(token, index + 1)
+        classes.add(name)
+
+    if index < len(token) and token[index] == "[":
+        index += 1
+        attribute, index = read_selector_name(token, index)
+        if index < len(token) and token[index] == "=":
+            index += 1
+            if index >= len(token):
+                raise ValueError(f"Unsupported CSS selector token: {token}")
+            if token[index] in "\"'":
+                quote = token[index]
+                index += 1
+                value_start = index
+                while index < len(token) and token[index] != quote:
+                    index += 1
+                if index >= len(token):
+                    raise ValueError(f"Unsupported CSS selector token: {token}")
+                expected = token[value_start:index]
+                index += 1
+            else:
+                value_start = index
+                while index < len(token) and token[index] != "]":
+                    index += 1
+                expected = token[value_start:index].strip()
+                if not expected:
+                    raise ValueError(f"Unsupported CSS selector token: {token}")
+        if index >= len(token) or token[index] != "]":
+            raise ValueError(f"Unsupported CSS selector token: {token}")
+        index += 1
+
+    if index != len(token) or not any((wildcard, tag, element_id, classes, attribute)):
+        raise ValueError(f"Unsupported CSS selector token: {token}")
+    return tag, element_id, frozenset(classes), attribute, expected
 
 
 def selector_tokens(selector: str) -> tuple[SelectorToken, ...]:
-    return tuple(selector_token(token) for token in selector.replace(">", " ").split())
+    tokens: list[str] = []
+    current: list[str] = []
+    bracket_depth = 0
+    quote: str | None = None
+
+    def flush() -> None:
+        if current:
+            tokens.append("".join(current))
+            current.clear()
+
+    for character in selector:
+        if quote:
+            current.append(character)
+            if character == quote:
+                quote = None
+            continue
+        if character in "\"'" and bracket_depth:
+            quote = character
+            current.append(character)
+        elif character == "[":
+            bracket_depth += 1
+            current.append(character)
+        elif character == "]":
+            if bracket_depth == 0:
+                raise ValueError("Unsupported CSS selector")
+            bracket_depth -= 1
+            current.append(character)
+        elif bracket_depth == 0 and (character.isspace() or character == ">"):
+            flush()
+        else:
+            current.append(character)
+
+    if quote or bracket_depth:
+        raise ValueError("Unsupported CSS selector")
+    flush()
+    if not tokens or len(tokens) > 12:
+        raise ValueError("Selector has too many tokens")
+    return tuple(selector_token(token) for token in tokens)
 
 
 def validate_selector(selector: str) -> str:
@@ -389,7 +542,7 @@ class Default(WorkerEntrypoint):
         content = payload["choices"][0]["message"]["content"]
         return validate_selectors(clean_model_json(content))
 
-    async def extract_product(self, payload: dict) -> dict[str, Any]:
+    async def _extract_product(self, payload: dict) -> dict[str, Any]:
         source_url = payload.get("url") if isinstance(payload, dict) else None
         parsed = urlparse(source_url or "")
         if parsed.scheme not in ("http", "https") or not parsed.netloc:
@@ -397,7 +550,7 @@ class Default(WorkerEntrypoint):
         page = await fetch(source_url, headers={"User-Agent": "Mantis/0.1 product selector discovery"})
         if page.status < 200 or page.status >= 300:
             raise ValueError(f"Product page fetch failed with status {page.status}")
-        html = await page.text()
+        html = clean_html(await page.text())
         final_url = page.url
         model = getattr(self.env, "OLLAMA_MODEL", "gpt-oss:120b")
         requested_selectors = payload.get("selectors")
@@ -414,6 +567,12 @@ class Default(WorkerEntrypoint):
                 feedback = str(exc)
         raise ValueError(feedback)
 
+    async def extract_product(self, payload: dict) -> dict[str, Any]:
+        try:
+            return await self._extract_product(payload)
+        except Exception as error:
+            return {"status": "failed", "error": extraction_error(error)}
+
     async def fetch(self, request):
         url = urlparse(request.url)
         if url.path == "/api/health":
@@ -421,6 +580,7 @@ class Default(WorkerEntrypoint):
         if url.path != "/api/extract" or request.method != "POST":
             return json_response({"error": "Not found"}, status=404)
         try:
-            return json_response(await self.extract_product(await request.json()))
+            result = await self.extract_product(await request.json())
+            return json_response(result, status=502 if result.get("status") == "failed" else 200)
         except Exception as exc:
-            return json_response({"error": str(exc)}, status=502)
+            return json_response({"status": "failed", "error": extraction_error(exc)}, status=502)
