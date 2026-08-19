@@ -3,7 +3,9 @@ import type { ProductRecord } from "../domain/product";
 type ProductCardProps = {
   product: ProductRecord;
   isDeleting: boolean;
+  isRetrying: boolean;
   onDelete: (product: ProductRecord) => void;
+  onRetry: (product: ProductRecord) => void;
 };
 
 function formatPrice(product: ProductRecord): string {
@@ -21,7 +23,13 @@ function formatPrice(product: ProductRecord): string {
   }
 }
 
-export function ProductCard({ product, isDeleting, onDelete }: ProductCardProps) {
+export function ProductCard({
+  product,
+  isDeleting,
+  isRetrying,
+  onDelete,
+  onRetry,
+}: ProductCardProps) {
   return (
     <article className="product-card">
       <div className="product-card__placeholder" aria-hidden="true">
@@ -48,10 +56,20 @@ export function ProductCard({ product, isDeleting, onDelete }: ProductCardProps)
           <a href={product.sourceUrl} target="_blank" rel="noreferrer">
             {product.sourceUrl}
           </a>
+          {product.status === "failed" && (
+            <button
+              className="product-card__retry"
+              type="button"
+              disabled={isRetrying || isDeleting}
+              onClick={() => onRetry(product)}
+            >
+              {isRetrying ? "Retrying..." : "Retry"}
+            </button>
+          )}
           <button
             className="product-card__delete"
             type="button"
-            disabled={isDeleting || product.status === "queued"}
+            disabled={isDeleting || isRetrying || product.status === "queued"}
             onClick={() => onDelete(product)}
           >
             {isDeleting ? "Deleting..." : "Delete"}

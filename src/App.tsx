@@ -5,6 +5,7 @@ import {
   addProduct,
   ExtractionResultSchema,
   markProductFailed,
+  markProductQueued,
   markProductReady,
   type ProductRecord,
 } from "./domain/product";
@@ -22,10 +23,37 @@ export default function App() {
   const [feedback, setFeedback] = useState<string | undefined>();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [deletingProductId, setDeletingProductId] = useState<string | undefined>();
+  const [retryingProductId, setRetryingProductId] = useState<string | undefined>();
 
   useEffect(() => {
     saveProducts(browserStorage(), products);
   }, [products]);
+
+  async function extractProduct(product: ProductRecord) {
+    try {
+      const response = await fetch("/api/extract", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: product.sourceUrl }),
+      });
+      const payload: unknown = await response.json();
+      if (!response.ok) {
+        const message =
+          typeof payload === "object" && payload !== null && "error" in payload
+            ? String(payload.error)
+            : "Extraction failed.";
+        throw new Error(message);
+      }
+
+      const extraction = ExtractionResultSchema.parse(payload);
+      setProducts((current) => markProductReady(current, product.id, extraction));
+      setFeedback("Product extracted and saved.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Extraction failed.";
+      setProducts((current) => markProductFailed(current, product.id, message));
+      setFeedback(`Extraction failed: ${message}`);
+    }
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -49,28 +77,24 @@ export default function App() {
     setFeedback("Product added. Extracting product details...");
 
     try {
-      const response = await fetch("/api/extract", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: result.product.sourceUrl }),
-      });
-      const payload: unknown = await response.json();
-      if (!response.ok) {
-        const message =
-          typeof payload === "object" && payload !== null && "error" in payload
-            ? String(payload.error)
-            : "Extraction failed.";
-        throw new Error(message);
-      }
-
-      const extraction = ExtractionResultSchema.parse(payload);
-      setProducts((current) => markProductReady(current, result.product.id, extraction));
-      setFeedback("Product extracted and saved in this browser.");
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Extraction failed.";
-      setProducts((current) => markProductFailed(current, result.product.id, message));
-      setFeedback(`Extraction failed: ${message}`);
+      await extractProduct(result.product);
     } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handleRetry(product: ProductRecord) {
+    if (isSubmitting) return;
+
+    setProducts((current) => markProductQueued(current, product.id));
+    setRetryingProductId(product.id);
+    setIsSubmitting(true);
+    setFeedback("Retrying product extraction...");
+
+    try {
+      await extractProduct(product);
+    } finally {
+      setRetryingProductId(undefined);
       setIsSubmitting(false);
     }
   }
@@ -162,7 +186,9 @@ export default function App() {
                 key={product.id}
                 product={product}
                 isDeleting={deletingProductId === product.id}
+                isRetrying={retryingProductId === product.id}
                 onDelete={handleDelete}
+                onRetry={handleRetry}
               />
             ))}
           </div>

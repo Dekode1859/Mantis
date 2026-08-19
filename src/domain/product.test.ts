@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   addProduct,
   createQueuedProduct,
+  markProductQueued,
   normalizeProductUrl,
 } from "./product";
 import { loadProducts, productStorageKey, saveProducts } from "./product-store";
@@ -61,5 +62,18 @@ describe("product link flow", () => {
 
     expect(values.has(productStorageKey)).toBe(true);
     expect(loadProducts(storage)).toEqual(products);
+  });
+
+  it("moves a failed product back to queued for retry", () => {
+    const product = {
+      ...createQueuedProduct("https://example.com/item"),
+      status: "failed" as const,
+      extractionError: "The scraper failed.",
+    };
+
+    expect(markProductQueued([product], product.id)[0]).toMatchObject({
+      status: "queued",
+      extractionError: null,
+    });
   });
 });

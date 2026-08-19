@@ -292,6 +292,26 @@ button:hover {
   font-size: 0.72rem;
 }
 
+.product-card__retry {
+  padding: 6px 9px;
+  color: #d9ff70;
+  border: 1px solid #53633d;
+  background: transparent;
+  font-size: 0.72rem;
+}
+
+.product-card__retry:hover {
+  color: #16200e;
+  background: #d9ff70;
+}
+
+.product-card__retry:disabled {
+  color: #73796f;
+  border-color: #3a4037;
+  background: transparent;
+  cursor: not-allowed;
+}
+
 .product-card__delete:hover {
   color: #17100e;
   background: #ff9d8d;

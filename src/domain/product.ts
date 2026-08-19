@@ -101,6 +101,21 @@ export function markProductReady(
   );
 }
 
+export function markProductQueued(
+  products: ProductRecord[],
+  productId: string,
+): ProductRecord[] {
+  return products.map((product) =>
+    product.id === productId
+      ? ProductRecordSchema.parse({
+          ...product,
+          status: "queued",
+          extractionError: null,
+        })
+      : product,
+  );
+}
+
 export function markProductFailed(
   products: ProductRecord[],
   productId: string,
