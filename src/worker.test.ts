@@ -68,6 +68,7 @@ describe("stored scraper configuration selection", () => {
       configurationSource: configuration.source,
       method: "deterministic",
       model: configuration.model,
+      durationMs: expect.any(Number),
     });
     expect(scraper.extract_product).toHaveBeenCalledOnce();
     expect(scraper.extract_product).toHaveBeenCalledWith({

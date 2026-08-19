@@ -14,6 +14,7 @@ import {
   listScraperConfigurations,
   saveScraperConfiguration,
 } from "./server/scrapers";
+import { insertProductScan } from "./server/scans";
 
 export interface Env {
   ASSETS: Fetcher;
@@ -39,6 +40,7 @@ interface ExtractionRoute {
   configurationSource: "llm" | "manual" | null;
   method: ExtractionMethod;
   model: string | null;
+  durationMs: number;
 }
 
 function isExtractionTrigger(value: unknown): value is ExtractionTrigger {
@@ -97,6 +99,10 @@ function logExtractionAttempt(input: {
   });
 }
 
+function actorForTrigger(trigger: ExtractionTrigger): "user" | "scheduler" {
+  return trigger === "scheduled" ? "scheduler" : "user";
+}
+
 export async function extractWithStoredConfigurations(
   env: Env,
   sourceUrl: string,
@@ -133,6 +139,7 @@ export async function extractWithStoredConfigurations(
         configurationSource: configuration.source,
         method: "deterministic",
         model: configuration.model,
+        durationMs: Date.now() - startedAt,
       };
     } catch (error) {
       logExtractionAttempt({
@@ -200,6 +207,7 @@ export async function extractWithStoredConfigurations(
     configurationSource: configuration?.source ?? null,
     method: "llm",
     model: extraction.model ?? null,
+    durationMs: Date.now() - startedAt,
   };
 }
 
@@ -224,6 +232,7 @@ export default {
 
         const sourceUrl = normalizeProductUrl(payload.url).toString();
         const trigger = payload.trigger ?? "manual";
+        const scanStartedAt = Date.now();
         await upsertProduct(env, queuedProduct(sourceUrl));
 
         try {
@@ -232,10 +241,34 @@ export default {
             env,
             readyProduct(sourceUrl, result.extraction, result.configurationId),
           );
+          await insertProductScan(env, {
+            sourceUrl,
+            scraperConfigurationId: result.configurationId,
+            method: result.method,
+            trigger,
+            actor: actorForTrigger(trigger),
+            status: "ready",
+            extraction: result.extraction,
+            model: result.model,
+            durationMs: result.durationMs,
+            extractionError: null,
+          });
           return Response.json(result.extraction);
         } catch (error) {
           const message = safeErrorMessage(error);
           await upsertProduct(env, failedProduct(sourceUrl, message));
+          await insertProductScan(env, {
+            sourceUrl,
+            scraperConfigurationId: null,
+            method: "llm",
+            trigger,
+            actor: actorForTrigger(trigger),
+            status: "failed",
+            extraction: null,
+            model: null,
+            durationMs: Date.now() - scanStartedAt,
+            extractionError: message,
+          });
           return Response.json({ error: message }, { status: 502 });
         }
       } catch (error) {
