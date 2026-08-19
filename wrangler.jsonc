@@ -19,6 +19,7 @@
     }
   ],
   "vars": {
+    "APP_URL": "https://mantis-preview.prateekdwivedi30.workers.dev",
     "SCRAPER_URL": "https://mantis-scraper-preview.prateekdwivedi30.workers.dev"
   },
   "queues": {

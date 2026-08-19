@@ -43,7 +43,7 @@ export function ProductCard({
           <span className={`status status--${product.status}`}>{product.status}</span>
         </div>
         <h2>{product.title ?? "Product waiting for extraction"}</h2>
-        {product.status === "ready" && (
+        {product.price !== null && product.currency !== null && (
           <dl className="product-card__details">
             <div>
               <dt>Price</dt>

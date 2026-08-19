@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { deleteProduct, listProducts, readyProduct, upsertProduct } from "./products";
+import {
+  deleteProduct,
+  failedProduct,
+  listProducts,
+  queuedProduct,
+  readyProduct,
+  upsertProduct,
+} from "./products";
 
 describe("product persistence", () => {
   afterEach(() => {
@@ -88,6 +95,39 @@ describe("product persistence", () => {
         }),
       ),
     ).rejects.toThrow("both server credentials");
+  });
+
+  it("preserves prior extraction fields when a refresh is queued or fails", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const env = {
+      SUPABASE_URL: "https://example.supabase.co",
+      SUPABASE_SERVICE_ROLE_KEY: "server-only-test-key",
+    };
+
+    await upsertProduct(env, queuedProduct("https://www.amazon.in/dp/B0GD6QSD4M"));
+    await upsertProduct(
+      env,
+      failedProduct("https://www.amazon.in/dp/B0GD6QSD4M", "price was unavailable"),
+    );
+
+    const queuedBody = JSON.parse(String(fetchMock.mock.calls[0][1].body));
+    const failedBody = JSON.parse(String(fetchMock.mock.calls[1][1].body));
+    expect(queuedBody).toMatchObject({
+      source_url: "https://www.amazon.in/dp/B0GD6QSD4M",
+      status: "queued",
+      extraction_error: null,
+    });
+    expect(queuedBody).not.toHaveProperty("title");
+    expect(queuedBody).not.toHaveProperty("price");
+    expect(queuedBody).not.toHaveProperty("last_extracted_at");
+    expect(failedBody).toMatchObject({
+      status: "failed",
+      extraction_error: "price was unavailable",
+    });
+    expect(failedBody).not.toHaveProperty("title");
+    expect(failedBody).not.toHaveProperty("price");
+    expect(failedBody).not.toHaveProperty("last_extracted_at");
   });
 
   it("deletes a product through the Supabase REST API", async () => {

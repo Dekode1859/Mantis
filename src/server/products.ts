@@ -10,12 +10,12 @@ export interface ProductWrite {
   sourceUrl: string;
   site: string;
   status: "queued" | "ready" | "failed";
-  title: string | null;
-  price: number | null;
-  currency: string | null;
-  asin: string | null;
-  seller: string | null;
-  extractionError: string | null;
+  title?: string | null;
+  price?: number | null;
+  currency?: string | null;
+  asin?: string | null;
+  seller?: string | null;
+  extractionError?: string | null;
   scraperConfigurationId?: string | null;
 }
 
@@ -72,16 +72,20 @@ function toRow(product: ProductWrite) {
     source_url: product.sourceUrl,
     site: product.site,
     status: product.status,
-    title: product.title,
-    price: product.price,
-    currency: product.currency,
-    external_product_id: product.asin,
-    seller_name: product.seller,
-    extraction_error: product.extractionError,
+    ...(product.title === undefined ? {} : { title: product.title }),
+    ...(product.price === undefined ? {} : { price: product.price }),
+    ...(product.currency === undefined ? {} : { currency: product.currency }),
+    ...(product.asin === undefined ? {} : { external_product_id: product.asin }),
+    ...(product.seller === undefined ? {} : { seller_name: product.seller }),
+    ...(product.extractionError === undefined
+      ? {}
+      : { extraction_error: product.extractionError }),
     ...(product.scraperConfigurationId === undefined
       ? {}
       : { scraper_configuration_id: product.scraperConfigurationId }),
-    last_extracted_at: product.status === "queued" ? null : new Date().toISOString(),
+    ...(product.status === "ready"
+      ? { last_extracted_at: new Date().toISOString() }
+      : {}),
     updated_at: new Date().toISOString(),
   };
 }
@@ -239,11 +243,6 @@ export function queuedProduct(sourceUrl: string): ProductWrite {
     sourceUrl,
     site: siteFromUrl(sourceUrl),
     status: "queued",
-    title: null,
-    price: null,
-    currency: null,
-    asin: null,
-    seller: null,
     extractionError: null,
   };
 }
@@ -272,11 +271,6 @@ export function failedProduct(sourceUrl: string, error: string): ProductWrite {
     sourceUrl,
     site: siteFromUrl(sourceUrl),
     status: "failed",
-    title: null,
-    price: null,
-    currency: null,
-    asin: null,
-    seller: null,
     extractionError: error,
   };
 }

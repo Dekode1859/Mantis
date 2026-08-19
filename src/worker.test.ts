@@ -429,26 +429,14 @@ describe("product API", () => {
           sourceUrl: "https://example.com/item",
           scheduledAt: "2026-08-19T03:00:00.000Z",
         },
+        delaySeconds: 0,
       },
     ]);
   });
 
   it("processes queued refreshes one at a time and acknowledges them", async () => {
     const logMock = vi.spyOn(console, "log").mockImplementation(() => undefined);
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(new Response(null, { status: 204 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify([configuration]), { status: 200 }))
-      .mockResolvedValueOnce(new Response(null, { status: 204 }))
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify([{ id: "11111111-1111-4111-8111-111111111111" }]), {
-          status: 200,
-        }),
-      )
-      .mockResolvedValueOnce(new Response(null, { status: 204 }));
-    const scraper = {
-      fetch: vi.fn().mockResolvedValue(new Response(JSON.stringify(extraction), { status: 200 })),
-    };
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(extraction), { status: 200 }));
     const ack = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
@@ -472,10 +460,16 @@ describe("product API", () => {
         ackAll: vi.fn(),
         retryAll: vi.fn(),
       },
-      { ...envBase, SCRAPER: scraper } as Env,
+      { ...envBase, APP_URL: "https://mantis-preview.example" } as Env,
     );
 
-    expect(scraper.fetch).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledWith(
+      new URL("https://mantis-preview.example/api/extract"),
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ url: extraction.source_url, trigger: "scheduled" }),
+      }),
+    );
     expect(ack).toHaveBeenCalledOnce();
     expect(logMock).toHaveBeenCalledWith(
       expect.objectContaining({

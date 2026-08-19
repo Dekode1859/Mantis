@@ -29,6 +29,7 @@ export interface Env {
   ASSETS: Fetcher;
   SCRAPER?: ScraperBinding;
   REFRESH_QUEUE?: Queue<RefreshQueueMessage>;
+  APP_URL?: string;
   SCRAPER_URL?: string;
   SUPABASE_URL?: string;
   SUPABASE_SERVICE_ROLE_KEY?: string;
@@ -436,11 +437,12 @@ export async function enqueueScheduledRefresh(
   if (!env.REFRESH_QUEUE) return runScheduledRefresh(env, scheduledAt);
 
   await env.REFRESH_QUEUE.sendBatch(
-    products.map((product) => ({
+    products.map((product, index) => ({
       body: {
         sourceUrl: product.sourceUrl,
         scheduledAt: scheduledAtIso,
       },
+      delaySeconds: index * 10,
     })),
   );
 
@@ -631,17 +633,25 @@ export default {
         continue;
       }
 
-      const result = await processProductExtraction(
-        env,
-        message.body.sourceUrl,
-        "scheduled",
-      );
+      if (!env.APP_URL) {
+        throw new Error("The application URL is not configured for queued refreshes.");
+      }
+
+      const response = await fetch(new URL("/api/extract", env.APP_URL), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url: message.body.sourceUrl,
+          trigger: "scheduled",
+        }),
+      });
+      const responseBody = await response.text();
       console.log({
         event: "scheduled_product_refresh",
         scheduled_at: message.body.scheduledAt,
         source_url: message.body.sourceUrl,
-        status: result.ok ? "ready" : "failed",
-        ...(result.ok ? {} : { error: result.error }),
+        status: response.ok ? "ready" : "failed",
+        ...(response.ok ? {} : { error: responseBody.slice(0, 500) }),
       });
       message.ack();
     }
